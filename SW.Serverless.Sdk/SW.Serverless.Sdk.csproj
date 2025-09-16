@@ -11,6 +11,7 @@
         <PackageIcon>icon.png</PackageIcon>
         <Copyright>Simplify9</Copyright>
         <Company>Simplify9</Company>
+        <Description>SDK for developing .NET serverless adapters with the Runner class, logging utilities, and adapter communication protocols. See https://github.com/simplify9/SW-Serverless for full documentation.</Description>
     </PropertyGroup>
 
     <ItemGroup>

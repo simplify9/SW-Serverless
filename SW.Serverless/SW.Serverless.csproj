@@ -11,6 +11,7 @@
         <RepositoryUrl>https://github.com/simplify9/Serverless</RepositoryUrl>
         <Copyright>Simplify9</Copyright>
         <Company>Simplify9</Company>
+        <Description>Open-source .NET framework for building and running serverless adapters and services. Provides process isolation, cloud storage integration, and ASP.NET Core dependency injection. See https://github.com/simplify9/SW-Serverless for full documentation.</Description>
         <PackageIcon>icon.png</PackageIcon>
     </PropertyGroup>
 

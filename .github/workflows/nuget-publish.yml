@@ -1,0 +1,57 @@
+name: Build and Publish NuGet Package
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      MAJOR: '8'
+      MINOR: '1'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine semantic version
+        id: semver
+        uses: simplify9/sw-workflows/actions/determine-semver@main
+        with:
+          major: ${{ env.MAJOR }}
+          minor: ${{ env.MINOR }}
+
+      - name: Dotnet Restore, Build, and Test
+        uses: simplify9/sw-workflows/actions/dotnet-build@main
+        with:
+          projects: "**/*.csproj"
+          test-projects: "**/*UnitTests/*.csproj"
+          configuration: "Release"
+          dotnet-version: "8.0.x"
+
+      - name: Pack and Push NuGet Package
+        uses: simplify9/sw-workflows/actions/dotnet-pack-push@main
+        with:
+          project: "SW.Serverless/SW.Serverless.csproj"
+          configuration: "Release"
+          version: ${{ steps.semver.outputs.version }}
+          api-key: ${{ secrets.SWNUGETKEY }}
+          nuget-source: "https://api.nuget.org/v3/index.json"
+
+      - name: Pack and Push SDK NuGet Package
+        uses: simplify9/sw-workflows/actions/dotnet-pack-push@main
+        with:
+          project: "SW.Serverless.Sdk/SW.Serverless.Sdk.csproj"
+          configuration: "Release"
+          version: ${{ steps.semver.outputs.version }}
+          api-key: ${{ secrets.SWNUGETKEY }}
+          nuget-source: "https://api.nuget.org/v3/index.json"
+
+      - name: Tag new version on GitHub origin
+        uses: simplify9/sw-workflows/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.S9_GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ steps.semver.outputs.version }}
+          sha: ${{ github.sha }}
