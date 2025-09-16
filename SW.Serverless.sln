@@ -21,8 +21,6 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SW.Serverless.UnitTests", "
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SW.Serverless.UnitTests.Adapter", "SW.Serverless.UnitTests.Adapter\SW.Serverless.UnitTests.Adapter.csproj", "{233C43CF-ECAC-4C94-9A8B-13568128016D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SW.Serverless.Desktop", "SW.Serverless.Desktop\SW.Serverless.Desktop.csproj", "{A4C1BEAC-134F-461D-9ED2-08B475BBA18F}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SW.Serverless.Installer.UnitTests", "SW.Serverless.Installer.UnitTests\SW.Serverless.Installer.UnitTests.csproj", "{ED1210FF-3503-45CF-B034-A40E6D803BCB}"
 EndProject
 Global
@@ -55,10 +53,6 @@ Global
 		{233C43CF-ECAC-4C94-9A8B-13568128016D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{233C43CF-ECAC-4C94-9A8B-13568128016D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{233C43CF-ECAC-4C94-9A8B-13568128016D}.Release|Any CPU.Build.0 = Release|Any CPU
-		{A4C1BEAC-134F-461D-9ED2-08B475BBA18F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{A4C1BEAC-134F-461D-9ED2-08B475BBA18F}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{A4C1BEAC-134F-461D-9ED2-08B475BBA18F}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{A4C1BEAC-134F-461D-9ED2-08B475BBA18F}.Release|Any CPU.Build.0 = Release|Any CPU
 		{ED1210FF-3503-45CF-B034-A40E6D803BCB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{ED1210FF-3503-45CF-B034-A40E6D803BCB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{ED1210FF-3503-45CF-B034-A40E6D803BCB}.Release|Any CPU.ActiveCfg = Release|Any CPU
