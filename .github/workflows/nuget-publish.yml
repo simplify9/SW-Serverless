@@ -29,24 +29,17 @@ jobs:
           test-projects: "**/*UnitTests/*.csproj"
           configuration: "Release"
           dotnet-version: "8.0.x"
+          run-tests: 'false'
 
-      - name: Pack and Push NuGet Package
+      - name: Pack and Push NuGet Packages
         uses: simplify9/sw-workflows/actions/dotnet-pack-push@main
         with:
-          project: "SW.Serverless/SW.Serverless.csproj"
+          projects: "SW.Serverless/SW.Serverless.csproj SW.Serverless.Sdk/SW.Serverless.Sdk.csproj"
           configuration: "Release"
           version: ${{ steps.semver.outputs.version }}
           api-key: ${{ secrets.SWNUGETKEY }}
           nuget-source: "https://api.nuget.org/v3/index.json"
 
-      - name: Pack and Push SDK NuGet Package
-        uses: simplify9/sw-workflows/actions/dotnet-pack-push@main
-        with:
-          project: "SW.Serverless.Sdk/SW.Serverless.Sdk.csproj"
-          configuration: "Release"
-          version: ${{ steps.semver.outputs.version }}
-          api-key: ${{ secrets.SWNUGETKEY }}
-          nuget-source: "https://api.nuget.org/v3/index.json"
 
       - name: Tag new version on GitHub origin
         uses: simplify9/sw-workflows/actions/tag-github-origin@main
