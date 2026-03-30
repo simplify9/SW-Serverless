@@ -107,7 +107,7 @@ namespace SW.Serverless
                     StandardErrorEncoding = Encoding.UTF8,
                 }
             };
-
+            
             process.OutputDataReceived += OutputDataReceived;
             process.ErrorDataReceived += ErrorDataReceived;
 
@@ -177,67 +177,81 @@ namespace SW.Serverless
 
         void ErrorDataReceived(object sender, DataReceivedEventArgs args)
         {
-            if (args.Data == null)
+            try
             {
-                //adapterLogger.LogWarning("Null data received on error stream.");
+                if (args.Data == null)
+                {
+                    //adapterLogger.LogWarning("Null data received on error stream.");
+                }
+                else if (args.Data.StartsWith(Constants.LogInformationIdentifier))
+                {
+                    adapterLogger.LogInformation(args.Data.Replace(Constants.LogInformationIdentifier, "").Replace(Constants.NewLineIdentifier, "\n"));
+                }
+                else if (args.Data.StartsWith(Constants.LogWarningIdentifier))
+                {
+                    adapterLogger.LogWarning(args.Data.Replace(Constants.LogWarningIdentifier, "").Replace(Constants.NewLineIdentifier, "\n"));
+                }
+                else if (args.Data.StartsWith(Constants.LogErrorIdentifier))
+                {
+                    adapterLogger.LogError(args.Data.Replace(Constants.LogErrorIdentifier, "").Replace(Constants.NewLineIdentifier, "\n"));
+                }
             }
-            else if (args.Data.StartsWith(Constants.LogInformationIdentifier))
+            catch (Exception ex)
             {
-                adapterLogger.LogInformation(args.Data.Replace(Constants.LogInformationIdentifier, "").Replace(Constants.NewLineIdentifier, "\n"));
+                logger.LogError(ex, "Unhandled exception in ErrorDataReceived.");
             }
-            else if (args.Data.StartsWith(Constants.LogWarningIdentifier))
-            {
-                adapterLogger.LogWarning(args.Data.Replace(Constants.LogWarningIdentifier, "").Replace(Constants.NewLineIdentifier, "\n"));
-            }
-            else if (args.Data.StartsWith(Constants.LogErrorIdentifier))
-            {
-                adapterLogger.LogError(args.Data.Replace(Constants.LogErrorIdentifier, "").Replace(Constants.NewLineIdentifier, "\n"));
-            }
-
         }
 
         void OutputDataReceived(object sender, DataReceivedEventArgs args)
         {
-            invocationTimeoutTimer?.Dispose();
-
-            if (args.Data == null && taskCompletionSource != null)
+            try
             {
-                trySetTrySetExceptionMethod.Invoke(taskCompletionSource, new object[] { new Exception("Received null data.") });
-                return;
-            }
+                invocationTimeoutTimer?.Dispose();
 
-            if (args.Data.StartsWith(Constants.ErrorIdentifier) && taskCompletionSource != null)
+                if (args.Data == null && taskCompletionSource != null)
+                {
+                    trySetTrySetExceptionMethod.Invoke(taskCompletionSource, new object[] { new Exception("Received null data.") });
+                    return;
+                }
+
+                if (args.Data.StartsWith(Constants.ErrorIdentifier) && taskCompletionSource != null)
+                {
+                    trySetTrySetExceptionMethod.Invoke(taskCompletionSource, new object[] { new Exception(args.Data) });
+                    return;
+                }
+
+                var outputSegments = args.Data.Split(Constants.Delimiter);
+
+                if (outputSegments.Length != 3 && taskCompletionSource != null)
+                {
+                    trySetTrySetExceptionMethod.Invoke(taskCompletionSource, new object[] { new Exception("Wrong data format.") });
+                    return;
+                }
+
+                var outputDenormalized = outputSegments[1].Replace(Constants.NewLineIdentifier, "\n");
+
+                var returnType = taskCompletionSource.GetType().GetGenericArguments()[0];
+                object resultTyped;
+
+                if (outputDenormalized == Constants.NullIdentifier)
+                    resultTyped = null;
+                else if (returnType == typeof(string))
+                    resultTyped = outputDenormalized;
+                else if (returnType.IsPrimitive)
+                    resultTyped = Convert.ChangeType(outputDenormalized, returnType);
+                else if (returnType == typeof(NoT))
+                    resultTyped = new NoT();
+                else
+                    resultTyped = JsonConvert.DeserializeObject(outputDenormalized, returnType);
+
+                trySetResultMethod.Invoke(taskCompletionSource, new object[] { resultTyped });
+            }
+            catch (Exception ex)
             {
-                trySetTrySetExceptionMethod.Invoke(taskCompletionSource, new object[] { new Exception(args.Data) });
-                return;
+                logger.LogError(ex, "Unhandled exception in OutputDataReceived. The adapter may be using an incompatible version of the Serverless SDK.");
+                if (taskCompletionSource != null)
+                    trySetTrySetExceptionMethod?.Invoke(taskCompletionSource, new object[] { ex });
             }
-
-            var outputSegments = args.Data.Split(Constants.Delimiter);
-
-            if (outputSegments.Length != 3 && taskCompletionSource != null)
-            {
-                trySetTrySetExceptionMethod.Invoke(taskCompletionSource, new object[] { new Exception("Wrong data format.") });
-                return;
-            }
-
-            var outputDenormalized = outputSegments[1].Replace(Constants.NewLineIdentifier, "\n");
-
-            var returnType = taskCompletionSource.GetType().GetGenericArguments()[0];
-            object resultTyped;
-
-            if (outputDenormalized == Constants.NullIdentifier)
-                resultTyped = null;
-            else if (returnType == typeof(string))
-                resultTyped = outputDenormalized;
-            else if (returnType.IsPrimitive)
-                resultTyped = Convert.ChangeType(outputDenormalized, returnType);
-            else if (returnType == typeof(NoT))
-                resultTyped = new NoT();
-            else
-                resultTyped = JsonConvert.DeserializeObject(outputDenormalized, returnType);
-
-
-            trySetResultMethod.Invoke(taskCompletionSource, new object[] { resultTyped });
         }
 
         async Task<AdapterMetadata> Install(string adapterId)
