@@ -208,9 +208,10 @@ namespace SW.Serverless
             {
                 invocationTimeoutTimer?.Dispose();
 
-                if (args.Data == null && taskCompletionSource != null)
+                if (args.Data == null)
                 {
-                    trySetTrySetExceptionMethod.Invoke(taskCompletionSource, new object[] { new Exception("Received null data.") });
+                    if (taskCompletionSource != null)
+                        trySetTrySetExceptionMethod.Invoke(taskCompletionSource, new object[] { new Exception("Received null data.") });
                     return;
                 }
 
