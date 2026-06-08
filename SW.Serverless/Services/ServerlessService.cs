@@ -305,12 +305,24 @@ namespace SW.Serverless
 
             //using var cloudFilesService = new CloudFilesService(serverlessOptions.CloudFilesOptions);
 
-            var metaData = await cloudFilesService.GetMetadataAsync($"{serverlessOptions.AdapterRemotePath}/{adapterId}".ToLower());
+            var metadataPath = $"{serverlessOptions.AdapterRemotePath}/{adapterId}".ToLower();
+            var cloudMetadata = await cloudFilesService.GetMetadataAsync(metadataPath);
+            var metaData = new Dictionary<string, string>(cloudMetadata, StringComparer.OrdinalIgnoreCase);
+
+            if (!metaData.TryGetValue("EntryAssembly", out var entryAssembly) ||
+                string.IsNullOrWhiteSpace(entryAssembly))
+                throw new InvalidOperationException(
+                    $"Adapter '{adapterId}' metadata at '{metadataPath}' is missing 'EntryAssembly'.");
+
+            if (!metaData.TryGetValue("Hash", out var hash) || string.IsNullOrWhiteSpace(hash))
+                throw new InvalidOperationException(
+                    $"Adapter '{adapterId}' metadata at '{metadataPath}' is missing 'Hash'.");
+
             adapterMetadata = new AdapterMetadata
             {
-                EntryAssembly = metaData["EntryAssembly"],
-                Hash = metaData["Hash"],
-                AdapterValues = new Dictionary<string, string>(metaData)
+                EntryAssembly = entryAssembly,
+                Hash = hash,
+                AdapterValues = metaData
             };
 
             adapterMetadata.LocalPath = Path.GetFullPath($"{serverlessOptions.AdapterLocalPath}/{adapterMetadata.Hash}/{adapterMetadata.EntryAssembly}");
