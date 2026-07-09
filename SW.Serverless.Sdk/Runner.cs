@@ -230,41 +230,42 @@ namespace SW.Serverless.Sdk
             methods.Where(m =>
                 m.ReturnType.IsGenericType && m.ReturnType.GetGenericTypeDefinition() == typeof(Task<>) &&
                 m.GetParameters().Length == 0).ToList().ForEach(m => methodsDictionary.Add(m.Name, new HandlerMethodInfo
-            {
-                MethodInfo = m,
-                Void = false,
-            }));
+                {
+                    MethodInfo = m,
+                    Void = false,
+                }));
 
             methods.Where(m =>
                 m.ReturnType.IsGenericType && m.ReturnType.GetGenericTypeDefinition() == typeof(Task<>) &&
                 m.GetParameters().Length == 1).ToList().ForEach(m => methodsDictionary.Add(m.Name, new HandlerMethodInfo
-            {
-                MethodInfo = m,
-                Void = false,
-                ParameterType = m.GetParameters()[0].ParameterType
-            }));
+                {
+                    MethodInfo = m,
+                    Void = false,
+                    ParameterType = m.GetParameters()[0].ParameterType
+                }));
 
             return methodsDictionary;
         }
 
-        public static void Expect(string name, bool optional = false, bool isPrivate = false)
+        public static void Expect(string name, bool optional = false, bool isPrivate = false, string description = null)
         {
-            Expect(name, null, optional, isPrivate);
+            Expect(name, null, optional, isPrivate, description);
         }
 
-        public static void Expect(string name, string defaultValue, bool isPrivate = false)
+        public static void Expect(string name, string defaultValue, bool isPrivate = false, string description = null)
         {
-            Expect(name, defaultValue, true, isPrivate);
+            Expect(name, defaultValue, true, isPrivate, description);
         }
 
-        private static void Expect(string name, string defaultValue, bool optional, bool isPrivate)
+        private static void Expect(string name, string defaultValue, bool optional, bool isPrivate, string description = null)
         {
             expectedStartupValues.TryAdd(name, new StartupValue
             {
                 Default = defaultValue,
                 Optional = optional,
                 Type = "text",
-                Private = isPrivate
+                Private = isPrivate,
+                Description = description
             });
         }
 
