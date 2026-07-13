@@ -1,0 +1,38 @@
+# =============================================================================
+# Critical Dependabot Vulnerability Check — Caller template
+# =============================================================================
+# USAGE:
+#   Copy this file to your repo at .github/workflows/critical-vuln-check.yml.
+#   No REPLACE values needed — this template requires no customization.
+#
+# WHAT IT DOES:
+#   Runs on every PR targeting main or develop. Fails if the repository has
+#   any open CRITICAL-severity Dependabot alert.
+#
+#   Enforcement differs by target branch via each repo's OWN branch
+#   protection settings (not by anything in this file):
+#     - On `main`:    mark this check REQUIRED in branch protection — merge
+#                     is physically blocked while a critical alert is open.
+#     - On `develop`: leave this check NOT required — it still shows as a
+#                     failing/red check (a visible warning) without blocking
+#                     the merge.
+# =============================================================================
+name: Critical Vulnerability Check
+run-name: vuln-check-${{ github.event.pull_request.number }}
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+# critical-vuln-gate.yml's own job requests these two scopes -- a caller can
+# only narrow permissions for a nested reusable-workflow job, never widen
+# them, so these must be granted here or the whole file fails to parse.
+permissions:
+  contents: write
+  security-events: read
+
+jobs:
+  vuln-gate:
+    uses: simplify9/.github/.github/workflows/critical-vuln-gate.yml@main
+    secrets:
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}

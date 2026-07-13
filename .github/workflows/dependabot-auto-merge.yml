@@ -1,0 +1,61 @@
+# =============================================================================
+# Dependabot Auto-Merge — Caller template
+# =============================================================================
+# USAGE:
+#   Copy this file to your repo at .github/workflows/dependabot-auto-merge.yml.
+#   No REPLACE values needed.
+#
+# WHAT IT DOES:
+#   Auto-merges a Dependabot PR ONLY when ALL of the following hold:
+#     - The PR author is dependabot[bot]
+#     - The update is a semver PATCH bump (never minor/major)
+#     - The ecosystem is npm, nuget, pub, bundler, or github-actions
+#       (NEVER docker — base image bumps always need manual review)
+#     - This repo currently has no open critical Dependabot alert (re-checked
+#       here explicitly — see workflow-templates/critical-vuln-check.yml's
+#       header for why this can't just `needs:` that file's job)
+#   "Auto-merge" here means GitHub's native auto-merge feature: it still
+#   waits for the repo's actual required status checks (build/test) to pass
+#   before merging — this workflow does not bypass those.
+# =============================================================================
+name: Dependabot Auto-Merge
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  pull-requests: write
+  contents: write
+  security-events: read
+
+jobs:
+  vuln-gate:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    uses: simplify9/.github/.github/workflows/critical-vuln-gate.yml@main
+    secrets:
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
+
+  auto-merge:
+    needs: vuln-gate
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for eligible patch bumps
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' &&
+          contains(fromJSON('["npm_and_yarn", "nuget", "pub", "bundler", "github_actions"]'), steps.metadata.outputs.package-ecosystem)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          echo "::notice title=🤖 [AUTO-MERGE] Enabling auto-merge::${PR_URL} — patch-level ${{ steps.metadata.outputs.package-ecosystem }} bump, vuln gate passed"
+          gh pr merge --auto --squash "$PR_URL"
