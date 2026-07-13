@@ -21,7 +21,7 @@ name: Critical Vulnerability Check
 run-name: vuln-check-${{ github.event.pull_request.number }}
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main, develop]
 
 # critical-vuln-gate.yml's own job requests these two scopes -- a caller can
