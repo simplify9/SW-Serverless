@@ -1,0 +1,36 @@
+# Dependabot config for .NET / NuGet API repos.
+# main is replaced by the rollout script with `develop` (if the
+# repo has that branch) or the repo's actual default branch otherwise.
+version: 2
+updates:
+  - package-ecosystem: "nuget"
+    directory: "/"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Amman"
+    open-pull-requests-limit: 10
+    groups:
+      nuget-minor-patch:
+        update-types: ["minor", "patch"]
+    labels:
+      - "dependencies"
+      - "nuget"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Amman"
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]
+    labels:
+      - "dependencies"
+      - "github-actions"
