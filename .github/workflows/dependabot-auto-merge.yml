@@ -31,14 +31,21 @@ permissions:
 
 jobs:
   vuln-gate:
-    if: ${{ github.actor == 'dependabot[bot]' }}
+    if: ${{ github.actor == 'dependabot[bot]' && github.event.pull_request.base.ref == 'main' }}
     uses: simplify9/.github/.github/workflows/critical-vuln-gate.yml@main
     secrets:
       dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 
   auto-merge:
     needs: vuln-gate
-    if: ${{ github.actor == 'dependabot[bot]' }}
+    # needs: vuln-gate normally skips this job if vuln-gate itself was skipped
+    # (base.ref != 'main') -- always() overrides that, then the boolean logic
+    # below re-applies the real gate: a develop-bound PR never needed
+    # vuln-gate to run at all, a main-bound PR still requires it to succeed.
+    if: |
+      always() &&
+      github.actor == 'dependabot[bot]' &&
+      (github.event.pull_request.base.ref != 'main' || needs.vuln-gate.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
