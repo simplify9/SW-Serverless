@@ -13,8 +13,10 @@ updates:
       timezone: "Asia/Amman"
     open-pull-requests-limit: 10
     groups:
-      nuget-minor-patch:
-        update-types: ["minor", "patch"]
+      nuget-patch:
+        update-types: ["patch"]
+      nuget-minor:
+        update-types: ["minor"]
     labels:
       - "dependencies"
       - "nuget"
@@ -29,8 +31,10 @@ updates:
       timezone: "Asia/Amman"
     open-pull-requests-limit: 5
     groups:
-      actions-minor-patch:
-        update-types: ["minor", "patch"]
+      actions-patch:
+        update-types: ["patch"]
+      actions-minor:
+        update-types: ["minor"]
     labels:
       - "dependencies"
       - "github-actions"
