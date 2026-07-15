@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
-    <PackageReference Include="SimplyWorks.CloudFiles.AS" Version="5.0.29" />
+    <PackageReference Include="SimplyWorks.CloudFiles.AS" Version="8.1.9" />
     <PackageReference Include="SimplyWorks.CloudFiles.S3" Version="8.0.1" />
     <PackageReference Include="SimplyWorks.CloudFiles.OC" Version="8.0.1" />
 
