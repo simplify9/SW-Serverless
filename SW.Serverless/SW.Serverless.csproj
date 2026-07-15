@@ -27,6 +27,7 @@
         <ProjectReference Include="..\SW.Serverless.Sdk\SW.Serverless.Sdk.csproj"/>
     </ItemGroup>
     <ItemGroup>
+        <PackageReference Include="SimplyWorks.PrimitiveTypes" Version="8.1.8" />
         <None Include="../icon.png">
             <Pack>True</Pack>
             <PackagePath></PackagePath>
