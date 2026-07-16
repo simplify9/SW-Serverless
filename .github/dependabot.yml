@@ -11,6 +11,11 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "Asia/Amman"
+    cooldown:
+      default-days: 3
+      semver-patch-days: 1
+      semver-minor-days: 3
+      semver-major-days: 7
     open-pull-requests-limit: 10
     groups:
       nuget-patch:
@@ -29,6 +34,11 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "Asia/Amman"
+    cooldown:
+      default-days: 3
+      semver-patch-days: 1
+      semver-minor-days: 3
+      semver-major-days: 7
     open-pull-requests-limit: 5
     groups:
       actions-patch:
