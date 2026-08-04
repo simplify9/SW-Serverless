@@ -58,6 +58,11 @@ namespace SW.Serverless
 
             var adapterMetadata = await Install(adapterId);
 
+            if (!File.Exists(adapterMetadata.LocalPath))
+                throw new FileNotFoundException(
+                    $"Adapter '{adapterId}' package does not contain the entry assembly '{Path.GetFileName(adapterMetadata.LocalPath)}' named in its metadata.",
+                    adapterMetadata.LocalPath);
+
             await StartAsync(adapterId, adapterMetadata, correlationId, startupValues);
         }
 
@@ -194,6 +199,12 @@ namespace SW.Serverless
                 else if (args.Data.StartsWith(Constants.LogErrorIdentifier))
                 {
                     adapterLogger.LogError(args.Data.Replace(Constants.LogErrorIdentifier, "").Replace(Constants.NewLineIdentifier, "\n"));
+                }
+                else
+                {
+                    //anything the adapter writes to stderr without going through AdapterLogger,
+                    //such as a host startup failure. Dropping it hides why the process died.
+                    adapterLogger.LogWarning(args.Data.Replace(Constants.NewLineIdentifier, "\n"));
                 }
             }
             catch (Exception ex)
