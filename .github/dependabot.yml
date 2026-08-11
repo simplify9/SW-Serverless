@@ -13,7 +13,7 @@ updates:
       timezone: "Asia/Amman"
     cooldown:
       default-days: 3
-      semver-patch-days: 1
+      semver-patch-days: 5
       semver-minor-days: 3
       semver-major-days: 7
     open-pull-requests-limit: 10
@@ -36,7 +36,7 @@ updates:
       timezone: "Asia/Amman"
     cooldown:
       default-days: 3
-      semver-patch-days: 1
+      semver-patch-days: 5
       semver-minor-days: 3
       semver-major-days: 7
     open-pull-requests-limit: 5
