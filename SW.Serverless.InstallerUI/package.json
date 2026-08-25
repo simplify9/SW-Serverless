@@ -20,6 +20,24 @@
     "email": "shaheen@simplify9.com"
   },
   "license": "MIT",
+  "resolutions": {
+    "json-schema": "0.4.0",
+    "form-data": "2.5.6",
+    "sha.js": "2.4.12",
+    "cipher-base": "1.0.7",
+    "elliptic": "6.6.1",
+    "minimist": "1.2.8",
+    "pbkdf2": "3.1.6",
+    "plist": "3.0.5",
+    "tar": "7.5.22",
+    "ts-loader/loader-utils": "1.4.2",
+    "html-webpack-plugin/loader-utils": "1.4.2",
+    "webpack/loader-utils": "1.4.2",
+    "copy-webpack-plugin/loader-utils": "2.0.4",
+    "css-loader/loader-utils": "2.0.4",
+    "node-loader/loader-utils": "2.0.4",
+    "style-loader/loader-utils": "2.0.4"
+  },
   "config": {
     "forge": {
       "packagerConfig": {
