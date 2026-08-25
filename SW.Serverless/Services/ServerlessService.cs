@@ -30,6 +30,7 @@ namespace SW.Serverless
         private MethodInfo trySetTrySetExceptionMethod;
         private Timer invocationTimeoutTimer;
         private bool processStarted;
+        private volatile bool timedOut;
         private ILogger adapterLogger;
         private readonly ICloudFilesService cloudFilesService; 
         public ServerlessService(ServerlessOptions serverlessOptions, IMemoryCache memoryCache, ILoggerFactory loggerFactory, IServiceProvider serviceProvider, ICloudFilesService cloudFilesService)
@@ -141,7 +142,7 @@ namespace SW.Serverless
                 throw new ArgumentException("Invalid name.", nameof(command));
             }
 
-            if (!processStarted || process.HasExited)
+            if (!processStarted || process.HasExited || timedOut)
                 throw new Exception("Process not started or terminated.");
 
             taskCompletionSource = new TaskCompletionSource<TResult>();
@@ -172,17 +173,22 @@ namespace SW.Serverless
         void InvocationTimeoutTimerCallback(object state)
         {
             invocationTimeoutTimer.Dispose();
-            trySetTrySetExceptionMethod.Invoke(taskCompletionSource, new object[] { new TimeoutException() });
 
             // The process is reused for multiple sequential commands on the same invocation
             // (e.g. CreateShipment followed by GetLogs in a finally block). If we leave a
             // timed-out process running, its eventual late output is delivered to whichever
             // taskCompletionSource is current by then - a later, unrelated invocation - and
-            // silently resolves it with the wrong (stale) result instead of its own. Killing
-            // the process here removes that possibility entirely: no further output can ever
-            // arrive, and the next InvokeAsync on this instance fails fast via the
-            // "process not started or terminated" guard instead of hanging or being
-            // mis-resolved.
+            // silently resolves it with the wrong (stale) result instead of its own.
+            //
+            // Order matters here: kill (and mark this instance permanently dead) BEFORE
+            // completing the caller's Task. Completing the Task first would let the awaiter's
+            // continuation - e.g. that same finally-block GetLogs follow-up - start a new
+            // InvokeAsync and overwrite taskCompletionSource while the old process is still
+            // alive, racing the kill below. Killing first, and sticking `timedOut` regardless
+            // of whether Kill() itself throws, guarantees no further output can ever arrive and
+            // that the next InvokeAsync on this instance fails fast via the "process not
+            // started or terminated" guard instead of hanging or being mis-resolved.
+            timedOut = true;
             try
             {
                 if (processStarted && !process.HasExited)
@@ -191,6 +197,10 @@ namespace SW.Serverless
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Failed to kill timed-out adapter process.");
+            }
+            finally
+            {
+                trySetTrySetExceptionMethod.Invoke(taskCompletionSource, new object[] { new TimeoutException() });
             }
         }
 
