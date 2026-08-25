@@ -173,6 +173,25 @@ namespace SW.Serverless
         {
             invocationTimeoutTimer.Dispose();
             trySetTrySetExceptionMethod.Invoke(taskCompletionSource, new object[] { new TimeoutException() });
+
+            // The process is reused for multiple sequential commands on the same invocation
+            // (e.g. CreateShipment followed by GetLogs in a finally block). If we leave a
+            // timed-out process running, its eventual late output is delivered to whichever
+            // taskCompletionSource is current by then - a later, unrelated invocation - and
+            // silently resolves it with the wrong (stale) result instead of its own. Killing
+            // the process here removes that possibility entirely: no further output can ever
+            // arrive, and the next InvokeAsync on this instance fails fast via the
+            // "process not started or terminated" guard instead of hanging or being
+            // mis-resolved.
+            try
+            {
+                if (processStarted && !process.HasExited)
+                    process.Kill();
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to kill timed-out adapter process.");
+            }
         }
 
         void ErrorDataReceived(object sender, DataReceivedEventArgs args)
