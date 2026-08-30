@@ -80,12 +80,13 @@ namespace SW.Serverless.Installer
 
                 if (!installer.BuildPublish(opts.ProjectPath, tempPath)) return;
 
+                var entryAssembly = ResolveEntryAssembly(tempPath, opts.ProjectPath);
+
+                if (entryAssembly == null) return;
+
                 var zipFileName = Path.Combine(tempPath, $"{opts.AdapterId}");
 
                 if (!installer.Compress(tempPath, zipFileName)) return;
-
-                var projectFileName = Path.GetFileName(opts.ProjectPath);
-                var entryAssembly = $"{projectFileName!.Remove(projectFileName.LastIndexOf('.'))}.dll";
 
                 if (!await installer.PushToCloud(zipFileName, entryAssembly, await GetServerlessUploadOptions(opts)))
                     return;
@@ -98,6 +99,31 @@ namespace SW.Serverless.Installer
             {
                 Console.WriteLine(ex.ToString());
             }
+        }
+
+        static string ResolveEntryAssembly(string publishPath, string projectPath)
+        {
+            // dotnet publish emits exactly one <AssemblyName>.runtimeconfig.json, for the startable
+            // assembly. That is more reliable than assuming the assembly is named after the project
+            // file, which is wrong whenever the project sets AssemblyName.
+            const string runtimeConfigSuffix = ".runtimeconfig.json";
+            var runtimeConfigs = Directory.GetFiles(publishPath, $"*{runtimeConfigSuffix}", SearchOption.TopDirectoryOnly);
+
+            var entryAssembly = runtimeConfigs.Length == 1
+                ? $"{Path.GetFileName(runtimeConfigs[0])[..^runtimeConfigSuffix.Length]}.dll"
+                : $"{Path.GetFileNameWithoutExtension(projectPath)}.dll";
+
+            if (File.Exists(Path.Combine(publishPath, entryAssembly)))
+            {
+                Console.WriteLine($"Entry assembly is {entryAssembly}.");
+                return entryAssembly;
+            }
+
+            Console.WriteLine(
+                $"Entry assembly '{entryAssembly}' is not in the published output. " +
+                "The adapter would fail to start, so nothing was uploaded.");
+
+            return null;
         }
     }
 }
