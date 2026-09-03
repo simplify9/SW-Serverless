@@ -1,0 +1,132 @@
+syntax = "proto3";
+
+option csharp_namespace = "SW.Serverless.Contract";
+package sw.serverless.v1;
+
+// The ENVELOPE only. Command names and payload shapes belong to the host's own SDK
+// (SimplyWorks.TraxisGateway.Sdk, SW.Bitween.Sdk, ...), never to this file — see the
+// design doc, section 14.6. Payloads are opaque bytes here on purpose.
+service AdapterHost {
+
+    // The adapter DIALS the host and opens one bidirectional stream.
+    // Same shape locally (UDS / named pipe) and orchestrated (TCP + TLS).
+    rpc Attach (stream AdapterFrame) returns (stream HostFrame);
+}
+
+// ---------------------------------------------------------------- host -> adapter
+
+message HostFrame {
+    int64 id = 1;             // correlates invoke->invoke_result and ping->pong
+    string traceparent = 2;   // W3C trace context
+    oneof body {
+        Ready ready = 3;
+        Invoke invoke = 4;
+        Ping ping = 5;
+        SetLogLevel set_log_level = 6;
+        Reset reset = 7;
+        Shutdown shutdown = 8;
+        EventAck event_ack = 9;
+    }
+}
+
+// Sent once, immediately after a valid Hello. Startup values travel HERE and not on
+// argv, which is what keeps broker credentials out of `ps aux`.
+message Ready {
+    int32 max_in_flight = 1;
+    map<string, string> startup_values = 2;
+    map<string, string> adapter_values = 3;
+}
+
+message Invoke {
+    string command = 1;
+    bytes payload = 2;
+    int32 timeout_seconds = 3;
+}
+
+message Ping {}
+
+message SetLogLevel { int32 level = 1; }
+
+// Ends the current logical session. Pooled adapters must clear per-session state here.
+message Reset { string session_id = 1; }
+
+message Shutdown {
+    string reason = 1;
+    bool drain = 2;           // true: stop fetching, finish in-flight, then exit
+}
+
+message EventAck {
+    bool accepted = 1;
+    string reference = 2;     // the host's id for what it persisted, e.g. an Xchange id
+    Error error = 3;
+}
+
+// ---------------------------------------------------------------- adapter -> host
+
+message AdapterFrame {
+    int64 id = 1;
+    string traceparent = 2;
+    oneof body {
+        Hello hello = 3;
+        InvokeResult invoke_result = 4;
+        Event event = 5;
+        LogEntry log = 6;
+        Metric metric = 7;
+        Pong pong = 8;
+    }
+}
+
+message Hello {
+    string token = 1;         // one-time token from the stdin handshake
+    string adapter_id = 2;
+    string instance_key = 3;
+    int32 protocol_version = 4;
+    string sdk_version = 5;
+    repeated string capabilities = 6;
+}
+
+message InvokeResult {
+    bytes payload = 1;
+    Error error = 2;
+}
+
+message Error {
+    string type = 1;
+    string message = 2;
+    string detail = 3;
+}
+
+// The push direction. The adapter must NOT acknowledge its broker until the
+// matching EventAck arrives — see the design doc, section 5.
+message Event {
+    bytes payload = 1;
+    string dedupe_key = 2;    // topic:partition:offset, message-id, content hash, ...
+    string content_type = 3;
+    map<string, string> headers = 4;
+    string endpoint = 5;      // which queue / topic / folder this came from
+}
+
+message LogEntry {
+    int32 level = 1;          // Trace 0 .. Critical 5, matching ILogger
+    string message = 2;
+    string exception = 3;
+    map<string, string> properties = 4;
+    int64 timestamp_unix_ms = 5;
+}
+
+message Metric {
+    string name = 1;
+    double value = 2;
+    map<string, string> tags = 3;
+}
+
+// Liveness is not enough: this separates "process dead" from "alive but disconnected"
+// from "connected but receiving nothing" — see the design doc, section 6.4.
+message Pong {
+    bool connected = 1;
+    string state = 2;
+    int64 last_message_unix_ms = 3;
+    int64 in_flight = 4;
+    string last_error = 5;
+    map<string, string> details = 6;
+}

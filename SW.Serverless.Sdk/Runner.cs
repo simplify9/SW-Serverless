@@ -34,6 +34,13 @@ namespace SW.Serverless.Sdk
             BuildMethodsDictionary(commandHandler);
         }
 
+        /// <summary>
+        /// Entry point for an adapter that STAYS RUNNING. Same zip, same spawn, same installation —
+        /// only this line differs from Run(). See the design doc, section 15.2.
+        /// </summary>
+        public static Task RunResident(object commandHandler) =>
+            Resident.ResidentRunner.RunAsync(commandHandler);
+
         async public static Task Run(object commandHandler)
         {
             Timer idleTimer = null;

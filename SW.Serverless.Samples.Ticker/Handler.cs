@@ -1,0 +1,142 @@
+using SW.Serverless.Sdk.Resident;
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace SW.Serverless.Samples.Ticker
+{
+    /// <summary>
+    /// The smallest possible resident adapter: it stays running and pushes an event on a timer.
+    /// Nothing external is required, so it is the right thing to run first when proving the
+    /// transport, the heartbeat and the push/ack handshake.
+    /// </summary>
+    public class Handler : IResidentAdapter
+    {
+        IAdapterContext context;
+        Task loop;
+        CancellationTokenSource cts;
+
+        int intervalSeconds = 3;
+        long produced, accepted, rejected;
+        DateTimeOffset? lastMessageOn;
+        string lastError;
+
+        // ------------------------------------------------------------------ lifecycle
+
+        public Task StartAsync(IAdapterContext context, CancellationToken cancellationToken)
+        {
+            this.context = context;
+
+            // Configuration arrives over the stream, never on argv.
+            if (int.TryParse(context.StartupValueOf("IntervalSeconds"), out var configured) && configured > 0)
+                intervalSeconds = configured;
+
+            cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+            context.LogInformation($"Ticker starting, every {intervalSeconds}s.",
+                new Dictionary<string, string> { ["intervalSeconds"] = intervalSeconds.ToString() });
+
+            // Return promptly — long-lived work goes on our own task, not the caller's.
+            loop = Task.Run(() => RunAsync(cts.Token));
+            return Task.CompletedTask;
+        }
+
+        public async Task StopAsync(CancellationToken cancellationToken)
+        {
+            context?.LogInformation("Ticker stopping.");
+            cts?.Cancel();
+            if (loop != null) await Task.WhenAny(loop, Task.Delay(2000, cancellationToken));
+        }
+
+        public Task<AdapterStatus> GetStatusAsync()
+        {
+            // Answered even while a tick is in flight, because the stream is multiplexed.
+            var status = new AdapterStatus
+            {
+                Connected = true,
+                State = produced == 0 ? "Idle" : "Connected",
+                LastMessageOn = lastMessageOn,
+                LastError = lastError
+            };
+            status.Details["produced"] = produced.ToString();
+            status.Details["accepted"] = accepted.ToString();
+            status.Details["rejected"] = rejected.ToString();
+            status.Details["intervalSeconds"] = intervalSeconds.ToString();
+            return Task.FromResult(status);
+        }
+
+        // ------------------------------------------------------------------ the push loop
+
+        async Task RunAsync(CancellationToken ct)
+        {
+            var sequence = 0L;
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(intervalSeconds), ct);
+                }
+                catch (OperationCanceledException) { return; }
+
+                sequence++;
+                var payload = Encoding.UTF8.GetBytes(
+                    $"{{\"sequence\":{sequence},\"utc\":\"{DateTimeOffset.UtcNow:O}\"}}");
+
+                try
+                {
+                    produced++;
+
+                    // Wait for the host to persist. A real broker adapter would only commit its
+                    // offset after this returns Accepted.
+                    var result = await context.PublishAsync(
+                        payload,
+                        dedupeKey: $"ticker:{context.InstanceKey}:{sequence}",
+                        endpoint: "tick",
+                        contentType: "application/json",
+                        cancellationToken: ct);
+
+                    if (result.Accepted)
+                    {
+                        accepted++;
+                        lastMessageOn = DateTimeOffset.UtcNow;
+                        context.Log(AdapterLogLevel.Debug, $"Tick {sequence} accepted as {result.Reference}.");
+                    }
+                    else
+                    {
+                        rejected++;
+                        lastError = result.Error;
+                        context.LogWarning($"Tick {sequence} rejected: {result.Error}");
+                    }
+
+                    context.Metric("ticker.published", 1, new Dictionary<string, string> { ["endpoint"] = "tick" });
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex)
+                {
+                    lastError = ex.Message;
+                    context.LogError($"Tick {sequence} failed.", ex);
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------ commands
+        // Public Task / Task<T> methods are discovered by name, exactly as in the classic runner.
+
+        public Task<object> SetInterval(int seconds)
+        {
+            if (seconds <= 0) throw new ArgumentOutOfRangeException(nameof(seconds), "Interval must be positive.");
+            intervalSeconds = seconds;
+            context.LogInformation($"Interval changed to {seconds}s at runtime.");
+            return Task.FromResult<object>(new { intervalSeconds });
+        }
+
+        public Task<object> GetCounters() =>
+            Task.FromResult<object>(new { produced, accepted, rejected, lastMessageOn });
+
+        /// <summary>Demonstrates that a command failure comes back as a typed error, not a hang.</summary>
+        public Task Explode() => throw new InvalidOperationException("Deliberate failure from the ticker sample.");
+    }
+}
