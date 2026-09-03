@@ -21,19 +21,41 @@ the v1 code path byte for byte — which is what keeps the existing fleet alive.
 
 ## Run the samples
 
+Two hosts, for two kinds of look. Build the solution first — both package adapters from their
+build output.
+
+**Web dashboard** — live observability, both lifecycles side by side:
+
 ```bash
-dotnet build SW.Serverless.sln
+dotnet run --project SW.Serverless.SampleWeb
+```
+
+**Console** — the same runtime with no UI, if you would rather read a log:
+
+```bash
 dotnet run --project SW.Serverless.Samples.Host
 ```
 
-You should see both adapters attach, a burst of commands, then events arriving forever. Drop a
-`*.json` file into the inbox the host prints and it comes back as an `EVENT` line within a poll.
+Both start by packaging the sample adapters into a local-filesystem cloud store
+(`AddLocalTestsCloudFiles`, no credentials) and then starting them **by adapter id only** — so
+the download, extract and launch steps are exercised, not skipped. That is the
+"install a provider without redeploying" claim actually running.
 
 | Sample | What it is for |
 |---|---|
 | `SW.Serverless.Samples.Ticker` | Smallest resident adapter. Proves attach, push/ack, heartbeat, runtime reconfiguration and typed command errors. No dependencies. |
 | `SW.Serverless.Samples.FolderSource` | The reference **data source** shape — ingress, egress, topology, discovery, test-connection, real status — using a folder instead of a broker. A RabbitMQ or Kafka adapter is this class with a different client. |
-| `SW.Serverless.Samples.Host` | Stands in for Bitween. Implements `IAdapterEventSink`, starts both adapters, prints events and heartbeats. |
+| `SW.Serverless.Samples.Host` | Console host. Implements `IAdapterEventSink`, starts both adapters, prints events and heartbeats. |
+| `SW.Serverless.SampleWeb` | Blazor Server dashboard plus minimal APIs. Live adapter health, event feed, adapter logs and metrics, failure injection, and a page for the classic per-invocation lifecycle to contrast against. |
+
+### What the dashboard shows
+
+| Page | Why it is there |
+|---|---|
+| **Adapters** | Health from two independent sources — host-observed memory, CPU, threads, restarts and missed heartbeats, which keep working when an adapter is wedged; and adapter-reported state and provider detail from the heartbeat. Buttons invoke commands, toggle debug logging per instance at runtime, and kill a process so you can watch the supervisor restart it with backoff and then quarantine it. |
+| **Events** | The push direction with its ack outcome and the host's reference. "Reject the next 3 events" on the Adapters page proves the ordering: a rejected event leaves the file in place, it is redelivered, and the dedupe key makes the second delivery recognisable. |
+| **Logs & metrics** | Adapter log frames arriving as ordinary `ILogger` entries under `serverless.adapters.{id}`, and metric frames read back through a `MeterListener` on `System.Diagnostics.Metrics` — the same path any real exporter would use. |
+| **Classic lifecycle** | The unchanged v1 path: a process spawned and torn down per call. The contrast is the point — that spawn cost is what the pooled resident shape removes. |
 
 ## The transport
 
@@ -58,8 +80,25 @@ is also how broker credentials stop showing up in `ps aux`.
 * **Credit window** — `MaxInFlight` bounds unacknowledged events, so an adapter reading faster
   than the host persists cannot buffer its way to an OOM.
 
+## Tests
+
+```bash
+dotnet test SW.Serverless.UnitTests/SW.Serverless.UnitTests.csproj
+```
+
+The suite runs against a local-filesystem cloud store, so it needs no credentials and no cloud
+account. `ResidentAdapterTests` covers installation from storage, typed command results and
+typed failures, push/ack, and three things worth calling out:
+
+* **`A_timed_out_command_does_not_corrupt_the_next_call`** — the v1 regression. There a timed-out
+  command left the child running and its late reply resolved the *next* caller's completion,
+  which in Traxis reliably corrupted the `GetLogs` fetch issued right after it.
+* **`Heartbeat_is_answered_while_a_command_is_running`** — proves the stream is multiplexed. If it
+  were not, a slow command would starve the heartbeat and the supervisor would restart a healthy
+  adapter.
+* **`A_rejected_event_is_left_for_redelivery_and_then_deduplicated`** — ack ordering end to end.
+
 ## What is deliberately not here yet
 
-The S3 locator for resident specs (`AdapterSpec.EntryAssemblyPath` is set directly in the
-samples), the Kubernetes orchestrator, and OTLP export. Each is called out in the design doc with
-the phase it belongs to.
+The Kubernetes orchestrator and OTLP export. Both are called out in the design doc with the
+phase they belong to.

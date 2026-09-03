@@ -17,6 +17,7 @@ namespace SW.Serverless
             services.AddSingleton(serverlessOptions);
             services.AddTransient<IServerlessService, ServerlessService>();
             services.AddMemoryCache();
+            services.TryAddSingleton<AdapterInstaller>();
 
             return services;
         }
@@ -33,8 +34,12 @@ namespace SW.Serverless
             var options = new ResidentOptions();
             configure?.Invoke(options);
 
+            services.AddMemoryCache();
+
             services.AddSingleton(options);
             services.TryAddSingleton<IAdapterEventSink, TSink>();
+            services.TryAddSingleton<AdapterInstaller>();
+            services.TryAddSingleton<IResidentAdapterLocator, DefaultResidentAdapterLocator>();
             services.AddSingleton<ResidentAdapterHost>();
             services.AddSingleton<IResidentAdapterHost>(sp => sp.GetRequiredService<ResidentAdapterHost>());
             services.AddHostedService(sp => sp.GetRequiredService<ResidentAdapterHost>());

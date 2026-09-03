@@ -35,5 +35,8 @@ namespace SW.Serverless.Resident
 
         ResidentAdapterInstance Get(string adapterId, string instanceKey);
         IReadOnlyCollection<ResidentAdapterInstance> List();
+
+        /// <summary>Health of every instance on this node, host-observed and adapter-reported.</summary>
+        IReadOnlyCollection<InstanceHealth> Describe();
     }
 }

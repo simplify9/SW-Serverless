@@ -1,0 +1,19 @@
+@inherits LayoutComponentBase
+
+<div class="shell">
+    <aside class="rail">
+        <div class="brand">SW<span>.Serverless</span></div>
+        <div class="brand-sub">adapter runtime · protocol 2</div>
+        <nav>
+            <NavLink href="" Match="NavLinkMatch.All">Adapters</NavLink>
+            <NavLink href="events">Events</NavLink>
+            <NavLink href="logs">Logs &amp; metrics</NavLink>
+            <NavLink href="classic">Classic lifecycle</NavLink>
+        </nav>
+        <div class="rail-note">
+            Two lifecycles run side by side here. The classic page spawns a process per call;
+            everything else is a resident adapter that stays running and pushes.
+        </div>
+    </aside>
+    <main>@Body</main>
+</div>

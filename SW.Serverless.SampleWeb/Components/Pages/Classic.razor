@@ -1,0 +1,76 @@
+@page "/classic"
+@rendermode InteractiveServer
+@inject IServiceProvider Services
+
+<h1>Classic lifecycle</h1>
+<p class="lede">
+    The original per-invocation path, unchanged. <code>IServerlessService</code> is transient: each
+    call spawns <code>dotnet Adapter.dll</code>, runs, and the process dies when the scope ends. The
+    adapter here is built against the same SDK but calls <code>Runner.Run</code> rather than
+    <code>Runner.RunResident</code>, and its cloud metadata carries no <code>Protocol</code> key —
+    so the host takes the v1 code path for it.
+</p>
+
+<section class="card">
+    <h2>Invoke</h2>
+    <div class="actions">
+        <input @bind="command" placeholder="command" />
+        <input @bind="payload" placeholder="payload (optional)" class="wide" />
+        <button @onclick="Run" disabled="@busy">@(busy ? "Running…" : "Invoke")</button>
+    </div>
+    <div class="actions">
+        @foreach (var preset in new[] { "TestParameterless", "TestTypedReturn", "TestString", "TestException" })
+        {
+            <button class="pill muted" @onclick="() => Preset(preset)">@preset</button>
+        }
+    </div>
+    @if (result is not null)
+    {
+        <pre class="result @(result.StartsWith("ERROR") ? "bad" : "")">@result</pre>
+    }
+    <p class="sub">
+        Each click above starts and tears down a whole process. That cost is exactly what the
+        pooled resident shape removes — same adapter code, a warm instance checked out per call.
+    </p>
+</section>
+
+@code {
+    string command = "TestParameterless";
+    string payload = "";
+    string result;
+    bool busy;
+
+    void Preset(string name)
+    {
+        command = name;
+        payload = name == "TestString" ? "hello from the sample web" : "";
+    }
+
+    async Task Run()
+    {
+        busy = true;
+        result = null;
+        try
+        {
+            // Resolved per call, deliberately: one instance wraps exactly one child process.
+            using var scope = Services.CreateScope();
+            var serverless = scope.ServiceProvider.GetRequiredService<IServerlessService>();
+
+            await serverless.StartAsync(DemoBootstrapper.ClassicId, Guid.NewGuid().ToString("N"),
+                new Dictionary<string, string> { ["UserName"] = "sample", ["Password"] = "sample" });
+
+            var value = await serverless.InvokeAsync<string>(command,
+                string.IsNullOrWhiteSpace(payload) ? null : payload);
+
+            result = value ?? "(null)";
+        }
+        catch (Exception ex)
+        {
+            result = "ERROR  " + ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

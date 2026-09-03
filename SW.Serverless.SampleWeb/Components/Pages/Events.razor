@@ -1,0 +1,70 @@
+@page "/events"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject DashboardState State
+
+<h1>Events</h1>
+<p class="lede">
+    The push direction. An adapter sends an event and waits; the host persists and replies with an
+    ack carrying its own reference. Only then does the adapter commit its offset — or, for the
+    folder sample, archive the file.
+</p>
+
+<div class="tiles">
+    <div class="tile"><span class="k">Accepted</span><span class="v">@State.Accepted</span></div>
+    <div class="tile"><span class="k">Rejected</span><span class="v @(State.Rejected > 0 ? "warn" : "")">@State.Rejected</span></div>
+    <div class="tile"><span class="k">Duplicates</span><span class="v @(State.Duplicates > 0 ? "warn" : "")">@State.Duplicates</span></div>
+    <div class="tile"><span class="k">Total seen</span><span class="v">@State.Events.Total</span></div>
+</div>
+
+<div class="tw">
+    <table>
+        <thead>
+            <tr><th>Time</th><th>Adapter</th><th>Endpoint</th><th>Outcome</th><th>Reference</th>
+                <th>Dedupe key</th><th>Bytes</th><th>Body</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var e in rows)
+            {
+                <tr>
+                    <td class="num">@e.On.ToString("HH:mm:ss.fff")</td>
+                    <td>@e.AdapterId</td>
+                    <td>@e.Endpoint</td>
+                    <td><span class="pill @OutcomeClass(e.Outcome)">@e.Outcome</span></td>
+                    <td class="mono">@e.Reference</td>
+                    <td class="mono dim">@e.DedupeKey</td>
+                    <td class="num">@e.Bytes</td>
+                    <td class="mono dim">@e.Body</td>
+                </tr>
+            }
+            @if (rows.Count == 0)
+            {
+                <tr><td colspan="8" class="dim">No events yet. The ticker pushes one every few seconds.</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    IReadOnlyList<EventRow> rows = Array.Empty<EventRow>();
+    Timer timer;
+
+    protected override void OnInitialized()
+    {
+        rows = State.Events.Snapshot(100);
+        timer = new Timer(_ => InvokeAsync(() =>
+        {
+            rows = State.Events.Snapshot(100);
+            StateHasChanged();
+        }), null, 1000, 1000);
+    }
+
+    static string OutcomeClass(string outcome) => outcome switch
+    {
+        "accepted" => "ok",
+        "rejected" => "bad",
+        _ => "warn"
+    };
+
+    public void Dispose() => timer?.Dispose();
+}

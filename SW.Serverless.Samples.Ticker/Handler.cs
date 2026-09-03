@@ -138,5 +138,17 @@ namespace SW.Serverless.Samples.Ticker
 
         /// <summary>Demonstrates that a command failure comes back as a typed error, not a hang.</summary>
         public Task Explode() => throw new InvalidOperationException("Deliberate failure from the ticker sample.");
+
+        /// <summary>
+        /// Blocks for a while, so a caller can force a timeout. Under v1 the late reply would go on
+        /// to resolve the NEXT call's completion; here it is discarded, and the following call
+        /// still gets its own answer. Also proves the stream is multiplexed: the heartbeat is
+        /// answered while this is running.
+        /// </summary>
+        public async Task<object> Sleep(int seconds)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(seconds));
+            return new { sleptSeconds = seconds };
+        }
     }
 }

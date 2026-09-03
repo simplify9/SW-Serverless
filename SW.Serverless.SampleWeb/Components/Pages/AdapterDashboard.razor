@@ -1,0 +1,207 @@
+@page "/"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IResidentAdapterHost Host
+@inject DashboardState State
+@inject DemoBootstrapper Bootstrapper
+
+<h1>Adapters</h1>
+<p class="lede">
+    Every figure below comes from one of two independent sources. <strong>Host-observed</strong>
+    (memory, CPU, threads, restarts) needs no cooperation from the adapter, so it still works when
+    one is wedged. <strong>Adapter-reported</strong> (state, in-flight, provider detail) arrives on
+    the heartbeat.
+</p>
+
+@if (Bootstrapper.LastError is not null)
+{
+    <div class="banner bad">
+        <strong>Startup failed:</strong> @Bootstrapper.LastError
+        <div>Build the solution first — the sample packages adapters from their build output.</div>
+    </div>
+}
+
+<div class="tiles">
+    <div class="tile"><span class="k">Instances</span><span class="v">@health.Count</span></div>
+    <div class="tile"><span class="k">Events accepted</span><span class="v">@State.Accepted</span></div>
+    <div class="tile"><span class="k">Rejected</span><span class="v @(State.Rejected > 0 ? "warn" : "")">@State.Rejected</span></div>
+    <div class="tile"><span class="k">Duplicates caught</span><span class="v @(State.Duplicates > 0 ? "warn" : "")">@State.Duplicates</span></div>
+    <div class="tile"><span class="k">Node memory</span><span class="v">@(health.Sum(h => h.WorkingSetBytes) / 1024 / 1024) MB</span></div>
+</div>
+
+@foreach (var h in health.OrderBy(h => h.AdapterId))
+{
+    <section class="card">
+        <header>
+            <div>
+                <h2>@h.AdapterId <span class="key">@h.InstanceKey</span></h2>
+                <div class="sub">pid @(h.ProcessId?.ToString() ?? "—") · up @Format(h.Uptime)</div>
+            </div>
+            <div class="badges">
+                <span class="pill @StateClass(h)">@h.State</span>
+                <span class="pill @(h.Connected ? "ok" : "bad")">@(h.Connected ? "connected" : "disconnected")</span>
+                @if (h.ReportedState is not null && !h.ReportedState.Equals(h.State.ToString(), StringComparison.OrdinalIgnoreCase)
+                     && !(h.Connected && h.ReportedState == "Connected"))
+                {
+                    <span class="pill muted">@h.ReportedState</span>
+                }
+                @if (h.Quarantined)
+                {
+                    <span class="pill bad">quarantined</span>
+                }
+            </div>
+        </header>
+
+        <div class="grid">
+            <div><span class="k">Memory</span><span class="v">@(h.WorkingSetBytes / 1024 / 1024) MB</span></div>
+            <div><span class="k">CPU</span><span class="v">@h.CpuPercent.ToString("0.0")%</span></div>
+            <div><span class="k">Threads</span><span class="v">@h.ThreadCount</span></div>
+            <div><span class="k">Restarts</span><span class="v @(h.RestartCount > 0 ? "warn" : "")">@h.RestartCount</span></div>
+            <div><span class="k">Missed beats</span><span class="v @(h.MissedHeartbeats > 0 ? "warn" : "")">@h.MissedHeartbeats</span></div>
+            <div><span class="k">In flight</span><span class="v">@h.InFlight</span></div>
+            <div><span class="k">Last heartbeat</span><span class="v">@Ago(h.LastHeartbeatOn)</span></div>
+            <div><span class="k">Last message</span><span class="v">@Ago(h.LastMessageOn)</span></div>
+        </div>
+
+        @if (h.LastError is not null)
+        {
+            <div class="banner bad">Last error: @h.LastError</div>
+        }
+
+        @if (h.Details.Count > 0)
+        {
+            <div class="detail-row">
+                @foreach (var kv in h.Details.OrderBy(d => d.Key))
+                {
+                    <span class="chip"><b>@kv.Key</b> @kv.Value</span>
+                }
+            </div>
+        }
+
+        <div class="actions">
+            <button @onclick="() => Invoke(h, GuessCommand(h))">@GuessCommand(h)</button>
+            @if (h.AdapterId == DemoBootstrapper.TickerId)
+            {
+                <button @onclick='() => Invoke(h, "SetInterval", "2")'>SetInterval(2)</button>
+                <button class="danger" @onclick='() => Invoke(h, "Explode")'>Explode</button>
+            }
+            @if (h.AdapterId == DemoBootstrapper.FolderSourceId)
+            {
+                <button @onclick='() => Invoke(h, "Discover")'>Discover</button>
+                <button @onclick="DropFile">Drop a file into the inbox</button>
+            }
+            <button class="danger" @onclick="() => Kill(h)">Kill process</button>
+            <button @onclick="() => SetLevel(h)">Toggle debug logs</button>
+        </div>
+
+        @if (results.TryGetValue(Id(h), out var result))
+        {
+            <pre class="result @(result.StartsWith("ERROR") ? "bad" : "")">@result</pre>
+        }
+
+        <details>
+            <summary>Process output — last @h.Diagnostics.Count lines (crash forensics)</summary>
+            <pre class="diag">@(h.Diagnostics.Count == 0 ? "(nothing on stderr — a healthy adapter logs over the stream, not the console)" : string.Join("\n", h.Diagnostics.Take(30)))</pre>
+        </details>
+    </section>
+}
+
+<section class="card">
+    <h2>Failure injection</h2>
+    <p class="sub">
+        Rejecting an event proves the ack ordering: the folder adapter leaves the file in place
+        instead of archiving it, so it is redelivered — and the dedupe key means the second
+        delivery is recognised rather than double-persisted.
+    </p>
+    <div class="actions">
+        <button @onclick="() => State.RejectNext = 3">Reject the next 3 events</button>
+        <button @onclick="() => State.Reset()">Reset counters</button>
+    </div>
+    @if (State.RejectNext > 0)
+    {
+        <div class="banner warn">Rejecting the next @State.RejectNext events.</div>
+    }
+</section>
+
+@code {
+    IReadOnlyCollection<InstanceHealth> health = Array.Empty<InstanceHealth>();
+    readonly Dictionary<string, string> results = new();
+    Timer timer;
+
+    protected override void OnInitialized()
+    {
+        Refresh();
+        timer = new Timer(_ => InvokeAsync(() => { Refresh(); StateHasChanged(); }), null, 1000, 1000);
+    }
+
+    void Refresh() => health = Host.Describe();
+
+    static string Id(InstanceHealth h) => $"{h.AdapterId}/{h.InstanceKey}";
+
+    static string GuessCommand(InstanceHealth h) =>
+        h.AdapterId == DemoBootstrapper.FolderSourceId ? "TestConnection" : "GetCounters";
+
+    async Task Invoke(InstanceHealth h, string command, string payload = null)
+    {
+        var instance = Host.Get(h.AdapterId, h.InstanceKey);
+        if (instance is null) return;
+        try
+        {
+            results[Id(h)] = await instance.InvokeAsync<string>(command, payload, timeoutSeconds: 15)
+                             ?? "(no result)";
+        }
+        catch (AdapterInvocationException ex)
+        {
+            // A failing command comes back typed, not as a hang and not as the next caller's result.
+            results[Id(h)] = $"ERROR  {ex.AdapterExceptionType}: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            results[Id(h)] = $"ERROR  {ex.Message}";
+        }
+    }
+
+    void Kill(InstanceHealth h)
+    {
+        var instance = Host.Get(h.AdapterId, h.InstanceKey);
+        try { instance?.Process?.Kill(entireProcessTree: true); } catch { }
+        results[Id(h)] = "Process killed. The supervisor restarts it with exponential backoff — "
+                       + "watch the restart count, and the quarantine after repeated crashes.";
+    }
+
+    async Task SetLevel(InstanceHealth h)
+    {
+        var instance = Host.Get(h.AdapterId, h.InstanceKey);
+        if (instance is null) return;
+        debug = !debug;
+        await instance.SetLogLevelAsync(debug
+            ? Microsoft.Extensions.Logging.LogLevel.Debug
+            : Microsoft.Extensions.Logging.LogLevel.Information);
+        results[Id(h)] = $"Log level set to {(debug ? "Debug" : "Information")} at runtime, for this instance only.";
+    }
+
+    bool debug;
+
+    async Task DropFile()
+    {
+        var path = Path.Combine(DemoBootstrapper.InboxPath, $"web-{DateTime.UtcNow:HHmmssfff}.json");
+        await File.WriteAllTextAsync(path, $"{{\"droppedAt\":\"{DateTimeOffset.UtcNow:O}\"}}");
+    }
+
+    static string Format(TimeSpan t) =>
+        t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes}m" :
+        t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes}m {t.Seconds}s" : $"{(int)t.TotalSeconds}s";
+
+    static string Ago(DateTimeOffset? on) =>
+        on is null ? "never" : Format(DateTimeOffset.UtcNow - on.Value) + " ago";
+
+    static string StateClass(InstanceHealth h) => h.State switch
+    {
+        InstanceState.Ready => "ok",
+        InstanceState.Quarantined => "bad",
+        InstanceState.Stopped => "bad",
+        _ => "warn"
+    };
+
+    public void Dispose() => timer?.Dispose();
+}

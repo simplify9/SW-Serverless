@@ -33,10 +33,14 @@ namespace SW.Serverless.Resident
         Task supervisorTask;
         int stopped;
 
-        public ResidentAdapterHost(ResidentOptions options, IAdapterEventSink sink, ILoggerFactory loggerFactory)
+        readonly IResidentAdapterLocator locator;
+
+        public ResidentAdapterHost(ResidentOptions options, IAdapterEventSink sink,
+            IResidentAdapterLocator locator, ILoggerFactory loggerFactory)
         {
             this.options = options;
             this.sink = sink;
+            this.locator = locator;
             this.loggerFactory = loggerFactory;
             logger = loggerFactory.CreateLogger<ResidentAdapterHost>();
             launcher = new AdapterProcessLauncher(options, logger);
@@ -128,6 +132,14 @@ namespace SW.Serverless.Resident
         async Task SpawnAsync(Supervised supervised, CancellationToken cancellationToken)
         {
             var spec = supervised.Spec;
+
+            // Resolves an explicit path, or installs from cloud storage — which is what makes
+            // "add a provider without redeploying" real (design doc 15.2).
+            var resolved = await locator.ResolveAsync(spec, cancellationToken);
+            spec.EntryAssemblyPath = resolved.EntryAssemblyPath;
+            spec.Executable = resolved.Executable ?? spec.Executable;
+            if (resolved.AdapterValues != null) spec.AdapterValues = resolved.AdapterValues;
+
             var instance = new ResidentAdapterInstance(
                 spec.AdapterId,
                 spec.InstanceKey ?? "default",
@@ -264,6 +276,48 @@ namespace SW.Serverless.Resident
         public IReadOnlyCollection<ResidentAdapterInstance> List() =>
             instances.Values.Select(v => v.Instance).Where(i => i != null).ToArray();
 
+        public IReadOnlyCollection<InstanceHealth> Describe() =>
+            instances.Values.Where(v => v.Instance != null).Select(Describe).ToArray();
+
+        static InstanceHealth Describe(Supervised supervised)
+        {
+            var instance = supervised.Instance;
+            var status = instance.LastStatus;
+
+            var health = new InstanceHealth
+            {
+                AdapterId = instance.AdapterId,
+                InstanceKey = instance.InstanceKey,
+                State = instance.State,
+                WorkingSetBytes = supervised.LastWorkingSet,
+                CpuPercent = supervised.CpuPercent,
+                ThreadCount = supervised.LastThreadCount,
+                Uptime = DateTimeOffset.UtcNow - instance.StartedOn,
+                RestartCount = supervised.RestartCount,
+                MissedHeartbeats = supervised.MissedHeartbeats,
+                Quarantined = supervised.Quarantined,
+                DrainRequested = supervised.DrainRequested,
+                LastHeartbeatOn = supervised.LastHeartbeatOn,
+                Diagnostics = instance.Diagnostics
+            };
+
+            try { health.ProcessId = instance.Process?.HasExited == false ? instance.Process.Id : null; }
+            catch { }
+
+            if (status != null)
+            {
+                health.Connected = status.Connected;
+                health.ReportedState = status.State;
+                health.InFlight = status.InFlight;
+                health.LastError = string.IsNullOrEmpty(status.LastError) ? null : status.LastError;
+                if (status.LastMessageUnixMs > 0)
+                    health.LastMessageOn = DateTimeOffset.FromUnixTimeMilliseconds(status.LastMessageUnixMs);
+                foreach (var kv in status.Details) health.Details[kv.Key] = kv.Value;
+            }
+
+            return health;
+        }
+
         static string Key(string adapterId, string instanceKey) =>
             $"{adapterId}::{instanceKey ?? "default"}".ToLowerInvariant();
 
@@ -289,6 +343,7 @@ namespace SW.Serverless.Resident
                     {
                         await instance.PingAsync(options.HeartbeatInterval);
                         supervised.MissedHeartbeats = 0;
+                        supervised.LastHeartbeatOn = DateTimeOffset.UtcNow;
                     }
                     catch (Exception ex)
                     {
@@ -317,6 +372,19 @@ namespace SW.Serverless.Resident
 
                 var rss = process.WorkingSet64;
                 supervised.LastWorkingSet = rss;
+                supervised.LastThreadCount = process.Threads.Count;
+
+                var cpu = process.TotalProcessorTime;
+                var now = DateTimeOffset.UtcNow;
+                if (supervised.LastCpuSampleOn.HasValue)
+                {
+                    var wall = (now - supervised.LastCpuSampleOn.Value).TotalMilliseconds;
+                    if (wall > 0)
+                        supervised.CpuPercent = Math.Round(
+                            (cpu - supervised.LastCpu).TotalMilliseconds / wall / Environment.ProcessorCount * 100, 1);
+                }
+                supervised.LastCpu = cpu;
+                supervised.LastCpuSampleOn = now;
 
                 var soft = supervised.Spec.SoftMemoryLimitBytes > 0
                     ? supervised.Spec.SoftMemoryLimitBytes : options.SoftMemoryLimitBytes;
@@ -361,6 +429,11 @@ namespace SW.Serverless.Resident
             public bool DrainRequested;
             public bool Quarantined;
             public long LastWorkingSet;
+            public int LastThreadCount;
+            public double CpuPercent;
+            public TimeSpan LastCpu;
+            public DateTimeOffset? LastCpuSampleOn;
+            public DateTimeOffset? LastHeartbeatOn;
             readonly List<DateTimeOffset> crashes = new();
 
             public void RecordCrash(ResidentOptions options)
