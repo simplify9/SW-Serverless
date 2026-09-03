@@ -25,7 +25,7 @@
                           ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\SW.Serverless.Samples.FolderSource\SW.Serverless.Samples.FolderSource.csproj"
                           ReferenceOutputAssembly="false" />
-        <ProjectReference Include="..\SW.Serverless.UnitTests.Adapter\SW.Serverless.UnitTests.Adapter.csproj"
+        <ProjectReference Include="..\SW.Serverless.Samples.Classic\SW.Serverless.Samples.Classic.csproj"
                           ReferenceOutputAssembly="false" />
     </ItemGroup>
 

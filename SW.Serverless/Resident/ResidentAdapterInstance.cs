@@ -131,7 +131,7 @@ namespace SW.Serverless.Resident
             }
         }
 
-        async Task OnFrameAsync(AdapterFrame frame, CancellationToken ct)
+        Task OnFrameAsync(AdapterFrame frame, CancellationToken ct)
         {
             switch (frame.BodyCase)
             {
@@ -172,6 +172,8 @@ namespace SW.Serverless.Resident
                     AdapterMetrics.Record(AdapterId, InstanceKey, frame.Metric);
                     break;
             }
+
+            return Task.CompletedTask;
         }
 
         async Task HandleEventAsync(AdapterFrame frame, CancellationToken ct)

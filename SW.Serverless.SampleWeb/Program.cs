@@ -75,7 +75,12 @@ app.MapPost("/api/classic/{adapterId}/{command}", async (string adapterId, strin
     var body = await reader.ReadToEndAsync();
 
     await serverless.StartAsync(adapterId, Guid.NewGuid().ToString("N"),
-        new Dictionary<string, string> { ["UserName"] = "sample", ["Password"] = "sample" });
+        new Dictionary<string, string>
+        {
+            ["BaseUrl"] = "https://api.example.test",
+            ["ApiKey"] = "sample-key-not-a-real-secret",
+            ["TimeoutSeconds"] = "30"
+        });
 
     var result = await serverless.InvokeAsync<string>(command, string.IsNullOrWhiteSpace(body) ? null : body);
     return Results.Ok(new { adapterId, command, result });

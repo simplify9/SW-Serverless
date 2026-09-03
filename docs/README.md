@@ -45,6 +45,7 @@ the download, extract and launch steps are exercised, not skipped. That is the
 |---|---|
 | `SW.Serverless.Samples.Ticker` | Smallest resident adapter. Proves attach, push/ack, heartbeat, runtime reconfiguration and typed command errors. No dependencies. |
 | `SW.Serverless.Samples.FolderSource` | The reference **data source** shape — ingress, egress, topology, discovery, test-connection, real status — using a folder instead of a broker. A RabbitMQ or Kafka adapter is this class with a different client. |
+| `SW.Serverless.Samples.Classic` | A conventional **non-resident** adapter — `Runner.Run`, no `Protocol` metadata key, so the host takes the v1 path for it byte for byte. Shows startup values and the `{{expected}}` schema, typed commands, `AdapterLogger`, failures and timeouts, and process-static state. |
 | `SW.Serverless.Samples.Host` | Console host. Implements `IAdapterEventSink`, starts both adapters, prints events and heartbeats. |
 | `SW.Serverless.SampleWeb` | Blazor Server dashboard plus minimal APIs. Live adapter health, event feed, adapter logs and metrics, failure injection, and a page for the classic per-invocation lifecycle to contrast against. |
 
@@ -55,7 +56,7 @@ the download, extract and launch steps are exercised, not skipped. That is the
 | **Adapters** | Health from two independent sources — host-observed memory, CPU, threads, restarts and missed heartbeats, which keep working when an adapter is wedged; and adapter-reported state and provider detail from the heartbeat. Buttons invoke commands, toggle debug logging per instance at runtime, and kill a process so you can watch the supervisor restart it with backoff and then quarantine it. |
 | **Events** | The push direction with its ack outcome and the host's reference. "Reject the next 3 events" on the Adapters page proves the ordering: a rejected event leaves the file in place, it is redelivered, and the dedupe key makes the second delivery recognisable. |
 | **Logs & metrics** | Adapter log frames arriving as ordinary `ILogger` entries under `serverless.adapters.{id}`, and metric frames read back through a `MeterListener` on `System.Diagnostics.Metrics` — the same path any real exporter would use. |
-| **Classic lifecycle** | The unchanged v1 path: a process spawned and torn down per call. The contrast is the point — that spawn cost is what the pooled resident shape removes. |
+| **Classic lifecycle** | The unchanged v1 path, running `SW.Serverless.Samples.Classic`. **Who am I?** returns the adapter's own pid: click it repeatedly and the classic pid changes every time while the resident pid beside it never moves. That spawn cost is what the pooled resident shape removes. Also covers the `{{expected}}` startup-value schema, typed in/out commands, a deliberate failure, and a timeout. |
 
 ## The transport
 
@@ -79,6 +80,14 @@ is also how broker credentials stop showing up in `ps aux`.
   never drop.
 * **Credit window** — `MaxInFlight` bounds unacknowledged events, so an adapter reading faster
   than the host persists cannot buffer its way to an OOM.
+
+## A footgun the classic sample encodes
+
+`Runner.Run(new Handler())` constructs the handler **before** `Runner` has parsed argv, so calling
+`Runner.StartupValueOf(...)` from a constructor throws and the process dies before it can report
+anything — the host only sees the stream close with "Received null data." Declare expectations in
+the constructor; read values lazily, from the commands. `SW.Serverless.Samples.Classic` shows the
+correct shape.
 
 ## Tests
 

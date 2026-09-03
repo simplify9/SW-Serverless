@@ -56,7 +56,7 @@ namespace SW.Serverless.SampleWeb.Services
                     });
 
                 // No Protocol key: the classic per-invocation path, unchanged.
-                await packager.PublishAsync(ClassicId, "SW.Serverless.UnitTests.Adapter",
+                await packager.PublishAsync(ClassicId, "SW.Serverless.Samples.Classic",
                     new Dictionary<string, string> { ["Lifecycle"] = "invocation" });
             }
             catch (Exception ex)

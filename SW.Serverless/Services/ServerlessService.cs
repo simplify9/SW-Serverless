@@ -94,8 +94,16 @@ namespace SW.Serverless
             if (processStarted)
                 throw new Exception("Already started.");
 
-            if (startupValues == null) startupValues = new Dictionary<string, string>();
-            startupValues.Add(Constants.CorrelationIdName, correlationId);
+            // Copy rather than mutate. The caller's dictionary is often a long-lived entity's own
+            // settings — Traxis passes agent.Settings straight in — so adding CorrelationId to it
+            // leaked into that entity, and a second call with the same dictionary threw
+            // "An item with the same key has already been added".
+            var values = startupValues == null
+                ? new Dictionary<string, string>()
+                : new Dictionary<string, string>(startupValues);
+
+            values[Constants.CorrelationIdName] = correlationId;
+            startupValues = values;
 
             adapterLogger = loggerFactory.CreateLogger($"{adaptersNamingPrefix}.{adapterId}".ToLower());
 
