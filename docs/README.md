@@ -106,7 +106,18 @@ dotnet test SW.Serverless.UnitTests/SW.Serverless.UnitTests.csproj
 ```
 
 The suite runs against a local-filesystem cloud store, so it needs no credentials and no cloud
-account. `ResidentAdapterTests` covers installation from storage, typed command results and
+account. The RabbitMQ tests additionally start a broker with Testcontainers; **without Docker
+they report Inconclusive rather than failing**, and `SWSL_SKIP_BROKER_TESTS=1` skips them
+deliberately — so `dotnet test` is safe to run anywhere.
+
+`RabbitAdapterTests` runs both broker adapters end to end: publish and confirm, publisher →
+broker → consumer → host, `mandatory` returns, runtime prefetch and interval changes, purge,
+staged test-connection, topology discovery, advertised commands, and heartbeat detail. The one
+that matters most is `A_rejected_message_is_nacked_back_and_redelivered` — a host rejection
+becomes `BasicNack(requeue: true)`, the message returns to the queue, and the redelivery carries
+the same dedupe key so the host recognises it instead of persisting it twice.
+
+`ResidentAdapterTests` covers installation from storage, typed command results and
 typed failures, push/ack, and three things worth calling out:
 
 * **`A_timed_out_command_does_not_corrupt_the_next_call`** — the v1 regression. There a timed-out

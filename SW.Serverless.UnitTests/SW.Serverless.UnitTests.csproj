@@ -14,6 +14,9 @@
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
+        <!-- Same version Bitween-api pins, so the monorepo stays on one Testcontainers. -->
+        <PackageReference Include="Testcontainers.RabbitMq" Version="3.10.0" />
+        <PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
         <PackageReference Include="SimplyWorks.CloudFiles.LocalTests" Version="8.1.6" />
         <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="8.1.6" />
 
@@ -28,6 +31,10 @@
         <ProjectReference Include="..\SW.Serverless.Samples.Ticker\SW.Serverless.Samples.Ticker.csproj"
                           ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\SW.Serverless.Samples.FolderSource\SW.Serverless.Samples.FolderSource.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.RabbitPublisher\SW.Serverless.Samples.RabbitPublisher.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.RabbitConsumer\SW.Serverless.Samples.RabbitConsumer.csproj"
                           ReferenceOutputAssembly="false" />
     </ItemGroup>
 
