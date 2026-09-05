@@ -1,0 +1,18 @@
+@* Ten one-second buckets of event throughput. Inline SVG — no charting library needed. *@
+
+<svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none" role="img"
+     aria-label="Events per second over the last ten seconds">
+    @for (var i = 0; i < bars.Length; i++)
+    {
+        var height = max == 0 ? 0.5 : Math.Max(0.5, bars[i] / (double)max * 22);
+        <rect x="@(i * 10 + 1)" y="@(23 - height).ToString("0.##")"
+              width="8" height="@height.ToString("0.##")" rx="1" fill="currentColor" />
+    }
+</svg>
+
+@code {
+    [Parameter] public int[] Values { get; set; } = Array.Empty<int>();
+
+    int[] bars => Values is { Length: > 0 } ? Values : new int[10];
+    int max => bars.Length == 0 ? 0 : bars.Max();
+}

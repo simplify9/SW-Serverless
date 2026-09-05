@@ -1,6 +1,7 @@
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using SW.Serverless.Contract;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace SW.Serverless.Resident
@@ -38,6 +39,15 @@ namespace SW.Serverless.Resident
                     first.Hello.AdapterId);
                 throw new RpcException(new Status(StatusCode.PermissionDenied, "Unknown or already-used token."));
             }
+
+            instance.Capabilities = first.Hello.Capabilities.ToArray();
+            instance.Commands = first.Hello.Capabilities
+                .Where(c => c.StartsWith("command:", System.StringComparison.OrdinalIgnoreCase))
+                .Select(c => c["command:".Length..])
+                .OrderBy(c => c)
+                .ToArray();
+            instance.SdkVersion = first.Hello.SdkVersion;
+            instance.ProtocolVersion = first.Hello.ProtocolVersion;
 
             logger.LogInformation(
                 "Adapter {AdapterId}/{InstanceKey} attached. SDK {SdkVersion}, protocol {Protocol}.",

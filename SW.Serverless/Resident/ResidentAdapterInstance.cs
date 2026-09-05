@@ -64,6 +64,18 @@ namespace SW.Serverless.Resident
         public int RestartCount { get; internal set; }
         public Pong LastStatus { get; private set; }
         public IReadOnlyDictionary<string, string> StartupValues { get; internal set; }
+
+        /// <summary>
+        /// What the adapter said it can do, from its Hello frame: "resident", "resettable", and
+        /// "command:{Name}" for every command it discovered on its handler. A UI can build itself
+        /// from this instead of hardcoding what each adapter offers.
+        /// </summary>
+        public IReadOnlyCollection<string> Capabilities { get; internal set; } = Array.Empty<string>();
+
+        public IReadOnlyCollection<string> Commands { get; internal set; } = Array.Empty<string>();
+
+        public string SdkVersion { get; internal set; }
+        public int ProtocolVersion { get; internal set; }
         public IReadOnlyDictionary<string, string> AdapterValues { get; internal set; }
 
         public IReadOnlyCollection<string> Diagnostics => diagnostics.ToArray();

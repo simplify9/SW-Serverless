@@ -35,6 +35,13 @@ namespace SW.Serverless.Resident
         public string LastError { get; set; }
         public IDictionary<string, string> Details { get; set; } = new Dictionary<string, string>();
 
+        // Advertised by the adapter on attach
+        public IReadOnlyCollection<string> Capabilities { get; set; } = Array.Empty<string>();
+        public IReadOnlyCollection<string> Commands { get; set; } = Array.Empty<string>();
+        public string SdkVersion { get; set; }
+        public int ProtocolVersion { get; set; }
+        public IReadOnlyDictionary<string, string> StartupValues { get; set; }
+
         public IReadOnlyCollection<string> Diagnostics { get; set; } = Array.Empty<string>();
     }
 }

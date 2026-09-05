@@ -22,6 +22,17 @@ namespace SW.Serverless.SampleWeb.Services
         public const string TickerId = "sample.ticker";
         public const string FolderSourceId = "sample.foldersource";
         public const string ClassicId = "sample.classic";
+        public const string RabbitPublisherId = "rabbit.publisher";
+        public const string RabbitConsumerId = "rabbit.consumer";
+
+        const string Exchange = "swsl.sample";
+        const string RoutingKey = "sample.tick";
+
+        /// <summary>Set false, or RabbitMq:Host in configuration, to point at another broker.</summary>
+        public static string BrokerHost = Environment.GetEnvironmentVariable("SWSL_RABBIT_HOST") ?? "localhost";
+
+        public bool RabbitAvailable { get; private set; }
+        public string RabbitError { get; private set; }
 
         readonly AdapterPackager packager;
         readonly IResidentAdapterHost adapters;
@@ -58,6 +69,18 @@ namespace SW.Serverless.SampleWeb.Services
                 // No Protocol key: the classic per-invocation path, unchanged.
                 await packager.PublishAsync(ClassicId, "SW.Serverless.Samples.Classic",
                     new Dictionary<string, string> { ["Lifecycle"] = "invocation" });
+
+                await packager.PublishAsync(RabbitPublisherId, "SW.Serverless.Samples.RabbitPublisher",
+                    new Dictionary<string, string>
+                    {
+                        ["Protocol"] = "2", ["Lifecycle"] = "resident", ["MaxInFlight"] = "8"
+                    });
+
+                await packager.PublishAsync(RabbitConsumerId, "SW.Serverless.Samples.RabbitConsumer",
+                    new Dictionary<string, string>
+                    {
+                        ["Protocol"] = "2", ["Lifecycle"] = "resident", ["MaxInFlight"] = "32"
+                    });
             }
             catch (Exception ex)
             {
@@ -94,6 +117,54 @@ namespace SW.Serverless.SampleWeb.Services
             {
                 LastError = ex.Message;
                 logger.LogError(ex, "Could not start the resident adapters.");
+            }
+
+            // The broker pair is optional: with no RabbitMQ reachable the two adapters simply do
+            // not start, and the rest of the dashboard is unaffected. That is the intended
+            // failure mode — one data source being down is not a node-wide outage.
+            try
+            {
+                // Consumer first, so the queue and binding exist before anything is published.
+                await adapters.StartExclusiveAsync(new AdapterSpec
+                {
+                    AdapterId = RabbitConsumerId,
+                    InstanceKey = "ds-rabbit-in",
+                    StartupValues =
+                    {
+                        ["Host"] = BrokerHost,
+                        ["Exchange"] = Exchange,
+                        ["ExchangeType"] = "topic",
+                        ["RoutingKey"] = RoutingKey,
+                        ["Queue"] = "swsl.sample.inbound",
+                        ["Prefetch"] = "32",
+                        ["AutoDelete"] = "true"
+                    }
+                }, cancellationToken);
+
+                await adapters.StartExclusiveAsync(new AdapterSpec
+                {
+                    AdapterId = RabbitPublisherId,
+                    InstanceKey = "ds-rabbit-out",
+                    StartupValues =
+                    {
+                        ["Host"] = BrokerHost,
+                        ["Exchange"] = Exchange,
+                        ["ExchangeType"] = "topic",
+                        ["RoutingKey"] = RoutingKey,
+                        ["IntervalMs"] = "10",
+                        ["PublisherConfirms"] = "true"
+                    }
+                }, cancellationToken);
+
+                RabbitAvailable = true;
+                logger.LogInformation("RabbitMQ pair running against {Host}: publishing every 10 ms.", BrokerHost);
+            }
+            catch (Exception ex)
+            {
+                RabbitError = ex.Message;
+                logger.LogWarning("RabbitMQ samples not started ({Reason}). " +
+                    "Start a broker with: docker run -d --rm -p 5672:5672 -p 15672:15672 rabbitmq:3.13-management",
+                    ex.Message);
             }
         }
 

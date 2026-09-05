@@ -27,6 +27,10 @@
                           ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\SW.Serverless.Samples.Classic\SW.Serverless.Samples.Classic.csproj"
                           ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.RabbitPublisher\SW.Serverless.Samples.RabbitPublisher.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.RabbitConsumer\SW.Serverless.Samples.RabbitConsumer.csproj"
+                          ReferenceOutputAssembly="false" />
     </ItemGroup>
 
 </Project>

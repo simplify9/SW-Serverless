@@ -29,6 +29,51 @@ namespace SW.Serverless.SampleWeb.Telemetry
 
         public long Accepted, Rejected, Duplicates;
 
+        /// <summary>Pausing only stops the UI feed; events keep being persisted and acked.</summary>
+        public bool FeedPaused;
+
+        readonly Queue<DateTimeOffset> recent = new();
+        readonly object rateGate = new();
+
+        public void Tick()
+        {
+            var now = DateTimeOffset.UtcNow;
+            lock (rateGate)
+            {
+                recent.Enqueue(now);
+                while (recent.Count > 0 && now - recent.Peek() > TimeSpan.FromSeconds(10))
+                    recent.Dequeue();
+            }
+        }
+
+        /// <summary>Events per second over a rolling ten seconds.</summary>
+        public double RatePerSecond
+        {
+            get
+            {
+                lock (rateGate)
+                {
+                    if (recent.Count < 2) return 0;
+                    var span = (DateTimeOffset.UtcNow - recent.Peek()).TotalSeconds;
+                    return span <= 0 ? 0 : Math.Round(recent.Count / span, 1);
+                }
+            }
+        }
+
+        /// <summary>Ten one-second buckets, oldest first — enough for a sparkline.</summary>
+        public int[] RateHistogram()
+        {
+            var now = DateTimeOffset.UtcNow;
+            var buckets = new int[10];
+            lock (rateGate)
+                foreach (var at in recent)
+                {
+                    var age = (int)(now - at).TotalSeconds;
+                    if (age is >= 0 and < 10) buckets[9 - age]++;
+                }
+            return buckets;
+        }
+
         public void RecordMetric(string name, string adapterId, double value)
         {
             var key = $"{name}|{adapterId}";
@@ -46,6 +91,7 @@ namespace SW.Serverless.SampleWeb.Telemetry
             Logs.Clear();
             metrics.Clear();
             Accepted = Rejected = Duplicates = 0;
+            lock (rateGate) recent.Clear();
         }
     }
 }

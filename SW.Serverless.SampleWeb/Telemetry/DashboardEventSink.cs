@@ -28,6 +28,8 @@ namespace SW.Serverless.SampleWeb.Telemetry
 
         public Task<EventOutcome> OnEventAsync(InboundEvent e, CancellationToken cancellationToken)
         {
+            state.Tick();
+
             var body = Encoding.UTF8.GetString(e.Payload ?? Array.Empty<byte>());
             var preview = body.Length > 200 ? body[..200] + "..." : body;
 
@@ -55,8 +57,9 @@ namespace SW.Serverless.SampleWeb.Telemetry
             if (!string.IsNullOrEmpty(e.DedupeKey)) seen[e.DedupeKey] = reference;
 
             Interlocked.Increment(ref state.Accepted);
-            state.Events.Add(new EventRow(DateTimeOffset.Now, e.AdapterId, e.Endpoint,
-                e.DedupeKey, e.Payload?.Length ?? 0, preview, "accepted", reference));
+            if (!state.FeedPaused)
+                state.Events.Add(new EventRow(DateTimeOffset.Now, e.AdapterId, e.Endpoint,
+                    e.DedupeKey, e.Payload?.Length ?? 0, preview, "accepted", reference));
 
             return Task.FromResult(EventOutcome.Ok(reference));
         }

@@ -298,6 +298,11 @@ namespace SW.Serverless.Resident
                 Quarantined = supervised.Quarantined,
                 DrainRequested = supervised.DrainRequested,
                 LastHeartbeatOn = supervised.LastHeartbeatOn,
+                Capabilities = instance.Capabilities,
+                Commands = instance.Commands,
+                SdkVersion = instance.SdkVersion,
+                ProtocolVersion = instance.ProtocolVersion,
+                StartupValues = instance.StartupValues,
                 Diagnostics = instance.Diagnostics
             };
 

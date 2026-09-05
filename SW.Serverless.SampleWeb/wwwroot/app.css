@@ -63,6 +63,10 @@ code{font:.88em var(--mono);background:var(--muted-bg);padding:1px 5px;border-ra
 .pill.muted{background:var(--muted-bg);color:var(--ink2)}
 button.pill{cursor:pointer}
 
+.spark{width:100%;height:22px;color:var(--accent);opacity:.75;display:block;margin-top:2px}
+.cmd-head{display:flex;align-items:baseline;gap:9px;margin-top:16px;flex-wrap:wrap}
+.cmd-head .k{font:600 9.5px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--dim)}
+.cmd-head .dim{font-size:11.5px}
 .detail-row{display:flex;gap:7px;flex-wrap:wrap;margin-top:13px}
 .chip{font:11.5px var(--mono);background:var(--surface2);border:1px solid var(--rule);
   padding:3px 8px;border-radius:4px;color:var(--ink2)}

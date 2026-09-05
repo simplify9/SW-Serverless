@@ -11,10 +11,25 @@
 </p>
 
 <div class="tiles">
+    <div class="tile">
+        <span class="k">Events / second</span>
+        <span class="v">@State.RatePerSecond.ToString("0.0")</span>
+        <Spark Values="State.RateHistogram()" />
+    </div>
     <div class="tile"><span class="k">Accepted</span><span class="v">@State.Accepted</span></div>
     <div class="tile"><span class="k">Rejected</span><span class="v @(State.Rejected > 0 ? "warn" : "")">@State.Rejected</span></div>
     <div class="tile"><span class="k">Duplicates</span><span class="v @(State.Duplicates > 0 ? "warn" : "")">@State.Duplicates</span></div>
     <div class="tile"><span class="k">Total seen</span><span class="v">@State.Events.Total</span></div>
+</div>
+
+<div class="actions">
+    <button @onclick="() => State.FeedPaused = !State.FeedPaused">
+        @(State.FeedPaused ? "Resume feed" : "Pause feed")
+    </button>
+    <span class="dim">
+        Pausing stops only this list. The publisher keeps sending, the consumer keeps acking, and
+        the counters above keep moving — a UI must never become backpressure on the data path.
+    </span>
 </div>
 
 <div class="tw">

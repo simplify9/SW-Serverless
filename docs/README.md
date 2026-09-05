@@ -24,6 +24,13 @@ the v1 code path byte for byte — which is what keeps the existing fleet alive.
 Two hosts, for two kinds of look. Build the solution first — both package adapters from their
 build output.
 
+For the RabbitMQ pair, start a broker first — without one those two adapters simply do not start
+and the rest of the dashboard is unaffected, which is the intended failure mode:
+
+```bash
+docker run -d --rm -p 5672:5672 -p 15672:15672 rabbitmq:3.13-management
+```
+
 **Web dashboard** — live observability, both lifecycles side by side:
 
 ```bash
@@ -45,6 +52,9 @@ the download, extract and launch steps are exercised, not skipped. That is the
 |---|---|
 | `SW.Serverless.Samples.Ticker` | Smallest resident adapter. Proves attach, push/ack, heartbeat, runtime reconfiguration and typed command errors. No dependencies. |
 | `SW.Serverless.Samples.FolderSource` | The reference **data source** shape — ingress, egress, topology, discovery, test-connection, real status — using a folder instead of a broker. A RabbitMQ or Kafka adapter is this class with a different client. |
+| `SW.Serverless.Samples.RabbitMq` | Shared connection handling for the two broker samples. Everything is a startup value — host, vhost, exchange type, queue arguments — because a provider must not be opinionated about the broker's own model. Reconnection is deliberately **not** retried in a loop: the adapter reports itself disconnected and lets the supervisor decide, where backoff and crash-loop quarantine already live. |
+| `SW.Serverless.Samples.RabbitPublisher` | **Egress.** Publishes every 10 ms (~100/s) with publisher confirms and `mandatory: true`, so unroutable messages come back through `BasicReturn` instead of vanishing. `SetInterval` changes the rate while running. |
+| `SW.Serverless.Samples.RabbitConsumer` | **Ingress.** Declares a queue and binding, consumes with `autoAck: false`, and **only calls `BasicAck` after the host has acknowledged**. A host rejection becomes `BasicNack(requeue: true)`. This is the ordering to copy for a Kafka offset commit. `SetPrefetch` changes the broker-side backpressure dial at runtime. |
 | `SW.Serverless.Samples.Classic` | A conventional **non-resident** adapter — `Runner.Run`, no `Protocol` metadata key, so the host takes the v1 path for it byte for byte. Shows startup values and the `{{expected}}` schema, typed commands, `AdapterLogger`, failures and timeouts, and process-static state. |
 | `SW.Serverless.Samples.Host` | Console host. Implements `IAdapterEventSink`, starts both adapters, prints events and heartbeats. |
 | `SW.Serverless.SampleWeb` | Blazor Server dashboard plus minimal APIs. Live adapter health, event feed, adapter logs and metrics, failure injection, and a page for the classic per-invocation lifecycle to contrast against. |

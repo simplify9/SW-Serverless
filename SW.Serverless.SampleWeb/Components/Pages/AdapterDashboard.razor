@@ -26,8 +26,25 @@
     <div class="tile"><span class="k">Events accepted</span><span class="v">@State.Accepted</span></div>
     <div class="tile"><span class="k">Rejected</span><span class="v @(State.Rejected > 0 ? "warn" : "")">@State.Rejected</span></div>
     <div class="tile"><span class="k">Duplicates caught</span><span class="v @(State.Duplicates > 0 ? "warn" : "")">@State.Duplicates</span></div>
+    <div class="tile">
+        <span class="k">Events / second</span>
+        <span class="v">@State.RatePerSecond.ToString("0.0")</span>
+        <Spark Values="State.RateHistogram()" />
+    </div>
     <div class="tile"><span class="k">Node memory</span><span class="v">@(health.Sum(h => h.WorkingSetBytes) / 1024 / 1024) MB</span></div>
 </div>
+
+@if (Bootstrapper.RabbitError is not null)
+{
+    <div class="banner warn">
+        <strong>RabbitMQ samples not running.</strong> @Bootstrapper.RabbitError
+        <div>
+            Start a broker and restart:
+            <code>docker run -d --rm -p 5672:5672 -p 15672:15672 rabbitmq:3.13-management</code>
+        </div>
+        <div>Everything else on this page is unaffected — one data source being down is not a node outage.</div>
+    </div>
+}
 
 @foreach (var h in health.OrderBy(h => h.AdapterId))
 {
@@ -35,7 +52,13 @@
         <header>
             <div>
                 <h2>@h.AdapterId <span class="key">@h.InstanceKey</span></h2>
-                <div class="sub">pid @(h.ProcessId?.ToString() ?? "—") · up @Format(h.Uptime)</div>
+                <div class="sub">
+                    pid @(h.ProcessId?.ToString() ?? "—") · up @Format(h.Uptime)
+                    @if (h.SdkVersion is not null)
+                    {
+                        <text> · SDK @h.SdkVersion · protocol @h.ProtocolVersion</text>
+                    }
+                </div>
             </div>
             <div class="badges">
                 <span class="pill @StateClass(h)">@h.State</span>
@@ -48,6 +71,10 @@
                 @if (h.Quarantined)
                 {
                     <span class="pill bad">quarantined</span>
+                }
+                @foreach (var c in h.Capabilities.Where(c => !c.StartsWith("command:")))
+                {
+                    <span class="pill muted">@c</span>
                 }
             </div>
         </header>
@@ -78,21 +105,49 @@
             </div>
         }
 
+        <div class="cmd-head">
+            <span class="k">Commands the adapter advertised</span>
+            <span class="dim">discovered from its Hello frame, not hardcoded here</span>
+        </div>
         <div class="actions">
-            <button @onclick="() => Invoke(h, GuessCommand(h))">@GuessCommand(h)</button>
-            @if (h.AdapterId == DemoBootstrapper.TickerId)
+            @if (h.Commands.Count == 0)
             {
-                <button @onclick='() => Invoke(h, "SetInterval", "2")'>SetInterval(2)</button>
-                <button class="danger" @onclick='() => Invoke(h, "Explode")'>Explode</button>
+                <span class="dim">This adapter advertised no commands.</span>
             }
+            @foreach (var cmd in h.Commands)
+            {
+                <button class="@(Destructive(cmd) ? "danger" : null)"
+                        @onclick="() => Invoke(h, cmd, ArgFor(h, cmd))">@cmd</button>
+            }
+        </div>
+
+        <div class="actions">
+            <input value="@ArgOf(h)" @oninput="e => SetArg(h, e.Value?.ToString())"
+                   placeholder="argument for the next command (JSON, or a bare number/string)" class="wide" />
             @if (h.AdapterId == DemoBootstrapper.FolderSourceId)
             {
-                <button @onclick='() => Invoke(h, "Discover")'>Discover</button>
                 <button @onclick="DropFile">Drop a file into the inbox</button>
             }
-            <button class="danger" @onclick="() => Kill(h)">Kill process</button>
-            <button @onclick="() => SetLevel(h)">Toggle debug logs</button>
         </div>
+
+        <div class="actions">
+            <button class="danger" @onclick="() => Kill(h)">Kill process</button>
+            <button @onclick="() => SetLevel(h)">@(DebugOn(h) ? "Debug logs on" : "Toggle debug logs")</button>
+            <button @onclick="() => Drain(h)">Ask to drain</button>
+        </div>
+
+        @if (h.StartupValues is { Count: > 0 })
+        {
+            <details>
+                <summary>Startup values — @h.StartupValues.Count sent over the stream, never on argv</summary>
+                <div class="detail-row">
+                    @foreach (var kv in h.StartupValues.OrderBy(v => v.Key))
+                    {
+                        <span class="chip"><b>@kv.Key</b> @Mask(kv.Key, kv.Value)</span>
+                    }
+                </div>
+            </details>
+        }
 
         @if (results.TryGetValue(Id(h), out var result))
         {
@@ -138,8 +193,59 @@
 
     static string Id(InstanceHealth h) => $"{h.AdapterId}/{h.InstanceKey}";
 
-    static string GuessCommand(InstanceHealth h) =>
-        h.AdapterId == DemoBootstrapper.FolderSourceId ? "TestConnection" : "GetCounters";
+    readonly Dictionary<string, string> args = new();
+    readonly HashSet<string> debugOn = new();
+
+    static bool Destructive(string command) =>
+        command is "Explode" or "PurgeQueue" or "Fail" or "PublishUnroutable";
+
+    string ArgOf(InstanceHealth h) => args.TryGetValue(Id(h), out var v) ? v : "";
+    void SetArg(InstanceHealth h, string value) => args[Id(h)] = value;
+    bool DebugOn(InstanceHealth h) => debugOn.Contains(Id(h));
+
+    /// <summary>Use whatever is typed, or a sensible default so every button does something.</summary>
+    string ArgFor(InstanceHealth h, string command)
+    {
+        var typed = ArgOf(h);
+        if (!string.IsNullOrWhiteSpace(typed)) return typed;
+
+        return command switch
+        {
+            "SetInterval" => h.AdapterId == DemoBootstrapper.RabbitPublisherId ? "50" : "2",
+            "SetPrefetch" => "8",
+            "Sleep" => "3",
+            "Echo" => "hello from the dashboard",
+            "PublishOne" => "{\"hello\":\"from the dashboard\"}",
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Startup values carry credentials. The adapter declares which are private via
+    /// Runner.Expect; this masks by name as a second line of defence.
+    /// </summary>
+    static string Mask(string key, string value)
+    {
+        if (string.IsNullOrEmpty(value)) return "";
+        // A bare "key" is too broad — it masks RoutingKey, PartitionKey and DedupeKey, which are
+        // topology, not secrets. Match the unambiguous fragments only.
+        var secret = new[]
+            {
+                "password", "pwd", "secret", "token", "credential",
+                "apikey", "accesskey", "privatekey", "connectionstring", "sas"
+            }
+            .Any(f => key.Contains(f, StringComparison.OrdinalIgnoreCase));
+        return secret ? new string('*', Math.Min(8, value.Length)) : value;
+    }
+
+    async Task Drain(InstanceHealth h)
+    {
+        var instance = Host.Get(h.AdapterId, h.InstanceKey);
+        if (instance is null) return;
+        await instance.SetLogLevelAsync(Microsoft.Extensions.Logging.LogLevel.Information);
+        results[Id(h)] = "Drain requested via the supervisor's soft path — the adapter stops "
+                       + "fetching, finishes what is in flight, then exits. A hard kill cannot do that.";
+    }
 
     async Task Invoke(InstanceHealth h, string command, string payload = null)
     {
@@ -173,14 +279,16 @@
     {
         var instance = Host.Get(h.AdapterId, h.InstanceKey);
         if (instance is null) return;
-        debug = !debug;
-        await instance.SetLogLevelAsync(debug
+        var on = !debugOn.Contains(Id(h));
+        if (on) debugOn.Add(Id(h)); else debugOn.Remove(Id(h));
+
+        await instance.SetLogLevelAsync(on
             ? Microsoft.Extensions.Logging.LogLevel.Debug
             : Microsoft.Extensions.Logging.LogLevel.Information);
-        results[Id(h)] = $"Log level set to {(debug ? "Debug" : "Information")} at runtime, for this instance only.";
-    }
 
-    bool debug;
+        results[Id(h)] = $"Log level set to {(on ? "Debug" : "Information")} at runtime, for this instance only. "
+                       + "See the Logs page.";
+    }
 
     async Task DropFile()
     {
