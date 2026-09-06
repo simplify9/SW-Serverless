@@ -109,8 +109,9 @@ the download, extract and launch steps are exercised, not skipped. That is the
 
 The adapter **dials the host** over a Unix domain socket (`/tmp/swsl-<pid>.sock`) or a named pipe
 on Windows, and opens one bidirectional gRPC stream. A UDS is a filesystem path, not a network
-address: **no port, no bind address, no firewall rule, no auth token, no container network
-config.** The same contract binds to TCP + TLS for Kubernetes-orchestrated adapters, so both
+address: **no port, no bind address, no firewall rule, and no long-lived network authentication
+to configure.** The host validates a one-time handshake token on attach, so the endpoint is not
+unauthenticated — it simply needs no credential management. The same contract binds to TCP + TLS for Kubernetes-orchestrated adapters, so both
 modes share every line of code above the transport. See design section 15.
 
 The host writes the socket path and a one-time token to the child's **stdin**, not `argv` — which

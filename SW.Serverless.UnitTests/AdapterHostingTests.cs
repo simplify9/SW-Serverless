@@ -103,6 +103,11 @@ namespace SW.Serverless.UnitTests
         [TestMethod]
         public void A_prefixed_environment_variable_is_bound_but_loses_to_a_startup_value()
         {
+            // Captured and restored, not cleared: blanking a variable the developer's shell had
+            // set would leak out of the test and change later behaviour.
+            var previousChunk = Environment.GetEnvironmentVariable(AdapterConfiguration.EnvironmentPrefix + "ChunkSizeKb");
+            var previousPath = Environment.GetEnvironmentVariable(AdapterConfiguration.EnvironmentPrefix + "Path");
+
             Environment.SetEnvironmentVariable(AdapterConfiguration.EnvironmentPrefix + "ChunkSizeKb", "64");
             Environment.SetEnvironmentVariable(AdapterConfiguration.EnvironmentPrefix + "Path", "/from-env");
             try
@@ -115,8 +120,8 @@ namespace SW.Serverless.UnitTests
             }
             finally
             {
-                Environment.SetEnvironmentVariable(AdapterConfiguration.EnvironmentPrefix + "ChunkSizeKb", null);
-                Environment.SetEnvironmentVariable(AdapterConfiguration.EnvironmentPrefix + "Path", null);
+                Environment.SetEnvironmentVariable(AdapterConfiguration.EnvironmentPrefix + "ChunkSizeKb", previousChunk);
+                Environment.SetEnvironmentVariable(AdapterConfiguration.EnvironmentPrefix + "Path", previousPath);
             }
         }
 

@@ -27,6 +27,11 @@ namespace SW.Serverless.Resident
 
         readonly ConcurrentDictionary<string, Supervised> instances = new();
         readonly ConcurrentDictionary<string, AdapterPool> pools = new();
+
+        // Exclusive means exclusive. Two concurrent starts for one key — the supervisor and a
+        // manual start, say — would otherwise both find no Ready instance and both spawn, and for
+        // a broker connection that means duplicate consumption.
+        readonly ConcurrentDictionary<string, SemaphoreSlim> startGates = new();
         readonly CancellationTokenSource stopping = new();
 
         IHost transport;
@@ -82,11 +87,28 @@ namespace SW.Serverless.Resident
                     }))
                 .Build();
 
+            if (!isWindows)
+            {
+                // Tighten the DIRECTORY before the socket exists, so there is no window in which
+                // the endpoint is reachable with default permissions. The socket file itself is
+                // still narrowed below for platforms that honour its mode.
+                var directory = Path.GetDirectoryName(Path.GetFullPath(options.SocketPath));
+                if (!string.IsNullOrEmpty(directory) && directory != "/tmp")
+                {
+                    Directory.CreateDirectory(directory);
+                    try
+                    {
+                        File.SetUnixFileMode(directory,
+                            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    }
+                    catch (Exception ex) { logger.LogWarning(ex, "Could not tighten the socket directory."); }
+                }
+            }
+
             await transport.StartAsync(cancellationToken);
 
             if (!isWindows)
             {
-                // Access control is filesystem permissions: owner only.
                 try { File.SetUnixFileMode(options.SocketPath, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
                 catch (Exception ex) { logger.LogWarning(ex, "Could not tighten socket permissions."); }
             }
@@ -103,10 +125,16 @@ namespace SW.Serverless.Resident
 
             try { stopping.Cancel(); } catch (ObjectDisposedException) { }
 
-            foreach (var s in instances.Values.ToArray())
-                await StopSupervisedAsync(s, drain: true);
+            // Bounded by the host's own deadline: a hung adapter must not hold up shutdown for
+            // 30 seconds each, in sequence, until the orchestrator loses patience and SIGKILLs us.
+            await Task.WhenAny(
+                Task.WhenAll(instances.Values.ToArray().Select(s => StopSupervisedAsync(s, drain: true))),
+                Task.Delay(TimeSpan.FromSeconds(20), CancellationToken.None));
 
             foreach (var pool in pools.Values) await pool.DisposeAsync();
+
+            if (supervisorTask != null)
+                await Task.WhenAny(supervisorTask, Task.Delay(5000, CancellationToken.None));
 
             if (transport != null) await transport.StopAsync(cancellationToken);
 
@@ -119,14 +147,24 @@ namespace SW.Serverless.Resident
         public async Task<ResidentAdapterInstance> StartExclusiveAsync(AdapterSpec spec, CancellationToken cancellationToken = default)
         {
             var key = Key(spec.AdapterId, spec.InstanceKey);
-            if (instances.TryGetValue(key, out var existing) &&
-                existing.Instance.State == InstanceState.Ready)
-                return existing.Instance;
+            var gate = startGates.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
 
-            var supervised = new Supervised { Spec = spec };
-            instances[key] = supervised;
-            await SpawnAsync(supervised, cancellationToken);
-            return supervised.Instance;
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                if (instances.TryGetValue(key, out var existing) &&
+                    existing.Instance?.State == InstanceState.Ready)
+                    return existing.Instance;
+
+                var supervised = new Supervised { Spec = spec };
+                instances[key] = supervised;
+                await SpawnAsync(supervised, cancellationToken);
+                return supervised.Instance;
+            }
+            finally
+            {
+                gate.Release();
+            }
         }
 
         async Task SpawnAsync(Supervised supervised, CancellationToken cancellationToken)
@@ -146,15 +184,27 @@ namespace SW.Serverless.Resident
                 Guid.NewGuid().ToString("N"),
                 options, sink, loggerFactory)
             {
-                StartupValues = new Dictionary<string, string>(spec.StartupValues),
-                AdapterValues = new Dictionary<string, string>(spec.AdapterValues),
+                StartupValues = new Dictionary<string, string>(
+                    spec.StartupValues ?? new Dictionary<string, string>()),
+                AdapterValues = new Dictionary<string, string>(
+                    spec.AdapterValues ?? new Dictionary<string, string>()),
                 RestartCount = supervised.RestartCount
             };
 
             supervised.Instance = instance;
             registry.Expect(instance);
 
-            instance.Process = launcher.Launch(spec, instance);
+            try
+            {
+                instance.Process = launcher.Launch(spec, instance);
+            }
+            catch
+            {
+                // Otherwise the registry keeps waiting for a child that will never attach.
+                registry.Forget(instance.Token);
+                throw;
+            }
+
             instance.Process.Exited += (_, _) => OnExited(supervised, instance);
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stopping.Token);
@@ -186,6 +236,10 @@ namespace SW.Serverless.Resident
                 string.Join("\n", instance.Diagnostics.TakeLast(20)));
 
             supervised.RecordCrash(options);
+            supervised.MissedHeartbeats = 0;
+            supervised.DrainRequested = false;
+            supervised.LastCpuSampleOn = null;
+            _ = instance.DisposeAsync().AsTask();
 
             if (supervised.Quarantined)
             {
@@ -249,12 +303,20 @@ namespace SW.Serverless.Resident
             return pool.RentAsync(cancellationToken);
         }
 
-        internal Task<ResidentAdapterInstance> SpawnPooledAsync(AdapterSpec spec, string slot, CancellationToken ct)
+        internal async Task<ResidentAdapterInstance> SpawnPooledAsync(AdapterSpec spec, string slot,
+            CancellationToken ct)
         {
             var supervised = new Supervised { Spec = CloneWithKey(spec, slot) };
             instances[Key(spec.AdapterId, slot)] = supervised;
-            return SpawnAsync(supervised, ct).ContinueWith(_ => supervised.Instance, ct);
+
+            // ContinueWith swallowed the failure and handed back a null instance, so the caller
+            // got a NullReferenceException instead of the reason the spawn failed.
+            await SpawnAsync(supervised, ct);
+            return supervised.Instance;
         }
+
+        internal Task RetireAsync(string adapterId, string slot) =>
+            StopAsync(adapterId, slot, drain: false);
 
         static AdapterSpec CloneWithKey(AdapterSpec spec, string key) => new()
         {
@@ -335,34 +397,39 @@ namespace SW.Serverless.Resident
                 try { await Task.Delay(options.HeartbeatInterval, ct); }
                 catch (OperationCanceledException) { return; }
 
-                foreach (var supervised in instances.Values.ToArray())
+                // Concurrently: sequential pings meant one wedged adapter delayed detection for
+                // every adapter behind it in the loop, so a whole node could look healthy because
+                // the first instance was hanging.
+                await Task.WhenAll(instances.Values.ToArray().Select(HeartbeatAsync));
+            }
+        }
+
+        async Task HeartbeatAsync(Supervised supervised)
+        {
+            var instance = supervised.Instance;
+            if (instance == null || instance.State != InstanceState.Ready) return;
+
+            // Host-observed metrics need no adapter cooperation, so they still work when the
+            // adapter is wedged (design doc 6.3).
+            SampleProcess(supervised, instance);
+
+            try
+            {
+                await instance.PingAsync(options.HeartbeatInterval);
+                supervised.MissedHeartbeats = 0;
+                supervised.LastHeartbeatOn = DateTimeOffset.UtcNow;
+            }
+            catch (Exception ex)
+            {
+                supervised.MissedHeartbeats++;
+                logger.LogWarning(ex, "Heartbeat {Missed}/{Max} missed for {AdapterId}/{InstanceKey}.",
+                    supervised.MissedHeartbeats, options.MissedHeartbeatsBeforeRestart,
+                    instance.AdapterId, instance.InstanceKey);
+
+                if (supervised.MissedHeartbeats >= options.MissedHeartbeatsBeforeRestart)
                 {
-                    var instance = supervised.Instance;
-                    if (instance == null || instance.State != InstanceState.Ready) continue;
-
-                    // Host-observed metrics need no adapter cooperation, so they still work
-                    // when the adapter is wedged (design doc 6.3).
-                    SampleProcess(supervised, instance);
-
-                    try
-                    {
-                        await instance.PingAsync(options.HeartbeatInterval);
-                        supervised.MissedHeartbeats = 0;
-                        supervised.LastHeartbeatOn = DateTimeOffset.UtcNow;
-                    }
-                    catch (Exception ex)
-                    {
-                        supervised.MissedHeartbeats++;
-                        logger.LogWarning(ex, "Heartbeat {Missed}/{Max} missed for {AdapterId}/{InstanceKey}.",
-                            supervised.MissedHeartbeats, options.MissedHeartbeatsBeforeRestart,
-                            instance.AdapterId, instance.InstanceKey);
-
-                        if (supervised.MissedHeartbeats >= options.MissedHeartbeatsBeforeRestart)
-                        {
-                            supervised.MissedHeartbeats = 0;
-                            TryKill(instance.Process);   // Exited handler restarts it
-                        }
-                    }
+                    supervised.MissedHeartbeats = 0;
+                    TryKill(instance.Process);   // Exited handler restarts it
                 }
             }
         }

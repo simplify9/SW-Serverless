@@ -69,7 +69,42 @@ namespace SW.Serverless
                 extractionGate.Release();
             }
 
+            PruneSupersededVersions(adapterId, metadata.Hash);
+
             return metadata;
+        }
+
+        /// <summary>
+        /// Removes older extractions of the same adapter. Without this, every published version
+        /// stays on disk for the life of the pod — a few MB each, forever, and worse once pods are
+        /// long-lived because adapters are resident.
+        /// </summary>
+        void PruneSupersededVersions(string adapterId, string keepHash)
+        {
+            try
+            {
+                var root = new DirectoryInfo(options.AdapterLocalPath);
+                if (!root.Exists) return;
+
+                // Only directories this adapter's entry assembly lives in, so two adapters sharing
+                // the local path never delete each other's extractions.
+                var entryAssembly = Path.GetFileName(
+                    memoryCache.TryGetValue($"{NamingPrefix}.{adapterId}", out InstalledAdapter cached)
+                        ? cached.EntryAssembly
+                        : null);
+
+                if (string.IsNullOrEmpty(entryAssembly)) return;
+
+                foreach (var directory in root.GetDirectories())
+                {
+                    if (directory.Name == keepHash) continue;
+                    if (!File.Exists(Path.Combine(directory.FullName, entryAssembly))) continue;
+
+                    try { directory.Delete(recursive: true); }
+                    catch { /* still in use by a running adapter; the next install retries */ }
+                }
+            }
+            catch { /* pruning is housekeeping and must never fail an install */ }
         }
 
         public async Task<InstalledAdapter> GetMetadataAsync(string adapterId)

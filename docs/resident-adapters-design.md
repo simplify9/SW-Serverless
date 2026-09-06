@@ -1143,12 +1143,18 @@ supplies, for free, every property §3 was hand-rolling:
 | §3 requirement | Hand-built framing | gRPC |
 |---|---|---|
 | Binary payloads | custom body segment | `bytes` |
-| Multiplexing, message ids | custom id/correlation | HTTP/2 streams |
-| Credit-based flow control | custom credit protocol | HTTP/2 flow control |
+| Multiplexing | custom framing and stream ids | HTTP/2 streams |
+| Transport backpressure | custom windowing | HTTP/2 flow control |
 | Bidirectional, symmetric | custom frame types | bidi streaming |
 | Contract versioning | ad-hoc | proto field numbers |
 | Polyglot adapters | write a codec per language | `protoc` |
 | Tracing, metrics, logging | custom `log`/`metric` frames | interceptors + first-class OTel instrumentation |
+
+**Two things gRPC does not give you, and the contract still has to.** HTTP/2 flow control governs
+bytes on the wire, not application semantics: it will happily let an adapter push a thousand
+events the host has not persisted. So `AdapterFrame.id` correlation, the `Ack`/`Nack` reply on an
+event, and the `MaxInFlight` credit window remain **application-level requirements** — defined in
+the proto and enforced on both sides — rather than anything the transport supplies.
 
 That is a large amount of design, test, benchmark and version work removed — and §12.5's
 "benchmark the framing first" becomes unnecessary.

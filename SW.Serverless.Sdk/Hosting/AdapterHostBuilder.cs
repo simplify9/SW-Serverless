@@ -74,13 +74,43 @@ namespace SW.Serverless.Sdk.Hosting
         internal AdapterHostRunner(List<Action<IConfiguration, IServiceCollection>> configurators) =>
             this.configurators = configurators;
 
+        ServiceProvider provider;
+
         /// <summary>Classic, per-invocation lifecycle.</summary>
-        public Task RunAsync() => Runner.Run(() =>
-            Build(null, Runner.StartupValues, Runner.AdapterValues).GetRequiredService<THandler>());
+        public async Task RunAsync()
+        {
+            try
+            {
+                await Runner.Run(() =>
+                {
+                    provider = (ServiceProvider)Build(null, Runner.StartupValues, Runner.AdapterValues);
+                    return provider.GetRequiredService<THandler>();
+                });
+            }
+            finally
+            {
+                // Singletons the adapter registered — an HttpClient factory, a broker connection —
+                // get their Dispose called rather than relying on process exit.
+                if (provider != null) await provider.DisposeAsync();
+            }
+        }
 
         /// <summary>Resident lifecycle: stays running, pushes events.</summary>
-        public Task RunResidentAsync() => ResidentRunner.RunAsync(typeof(THandler), context =>
-            Build(context, context.StartupValues, context.AdapterValues).GetRequiredService<THandler>());
+        public async Task RunResidentAsync()
+        {
+            try
+            {
+                await ResidentRunner.RunAsync(typeof(THandler), context =>
+                {
+                    provider = (ServiceProvider)Build(context, context.StartupValues, context.AdapterValues);
+                    return provider.GetRequiredService<THandler>();
+                });
+            }
+            finally
+            {
+                if (provider != null) await provider.DisposeAsync();
+            }
+        }
 
         /// <summary>Exposed for tests: build the container without running anything.</summary>
         public IServiceProvider Build(IAdapterContext context,
