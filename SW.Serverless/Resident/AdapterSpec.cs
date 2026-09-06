@@ -30,5 +30,15 @@ namespace SW.Serverless.Resident
 
         public long SoftMemoryLimitBytes { get; set; }
         public long HardMemoryLimitBytes { get; set; }
+
+        /// <summary>
+        /// Sustained CPU ceiling as a percentage of the whole machine. Zero uses the host default. See
+        /// <see cref="ResourceLimits.CpuPercentLimit"/> for why it is sustained rather than
+        /// instantaneous.
+        /// </summary>
+        public double CpuPercentLimit { get; set; }
+
+        /// <summary>Consecutive over-limit samples before the CPU ceiling trips. Zero uses the host default.</summary>
+        public int CpuLimitSamples { get; set; }
     }
 }

@@ -35,6 +35,26 @@ namespace SW.Serverless.Resident
         Task StopAsync(string adapterId, string instanceKey, bool drain = true, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Changes the ceilings a running adapter is held to.
+        ///
+        /// The soft memory and CPU ceilings are read on every sample, so they are in force
+        /// immediately. The hard memory ceiling is the runtime's own GC heap limit and is fixed at
+        /// launch, so a change to it is reported as needing a restart rather than quietly ignored —
+        /// the caller decides whether that happens now or at a quieter moment.
+        /// </summary>
+        Task<LimitUpdate> UpdateLimitsAsync(string adapterId, string instanceKey,
+            ResourceLimits limits, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Relaunches an instance in place, keeping its registry entry — so a lease, a data source,
+        /// or anything else holding the key still points at it afterwards. Stopping and starting
+        /// instead drops the entry, which in Bitween's case would release the broker lease that
+        /// makes the connection exclusive.
+        /// </summary>
+        Task<ResidentAdapterInstance> RestartAsync(string adapterId, string instanceKey,
+            bool drain = true, CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Check out one warm instance from a pool of stateless workers. Replaces a per-invocation
         /// process spawn. Only for adapters declaring Poolable — a process-static field would
         /// otherwise leak across sessions (design doc 14.5).

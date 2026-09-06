@@ -31,6 +31,19 @@ namespace SW.Serverless.Resident
         public long SoftMemoryLimitBytes { get; set; } = 0;
         public long HardMemoryLimitBytes { get; set; } = 0;
 
+        /// <summary>
+        /// Sustained CPU ceiling as a percentage of the whole machine, applied to any adapter that does not
+        /// set its own. Off by default: a ceiling guessed on the host's behalf would recycle
+        /// whichever adapter happens to work hardest.
+        /// </summary>
+        public double CpuPercentLimit { get; set; } = 0;
+
+        /// <summary>
+        /// Consecutive samples above the CPU ceiling before it trips. Four heartbeats is long
+        /// enough that draining a backlog does not look like a runaway loop.
+        /// </summary>
+        public int CpuLimitSamples { get; set; } = 4;
+
         /// <summary>Workstation GC by default: server GC costs a heap and a thread per core.</summary>
         public bool UseWorkstationGc { get; set; } = true;
     }

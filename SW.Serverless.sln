@@ -45,6 +45,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SW.Serverless.Samples.Carri
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SW.Serverless.Samples.CarrierContract", "SW.Serverless.Samples.CarrierContract\SW.Serverless.Samples.CarrierContract.csproj", "{89099FF5-6D08-481C-A2F8-E9B5A62DA091}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SW.Serverless.Samples.Greedy", "SW.Serverless.Samples.Greedy\SW.Serverless.Samples.Greedy.csproj", "{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -271,6 +273,18 @@ Global
 		{89099FF5-6D08-481C-A2F8-E9B5A62DA091}.Release|x64.Build.0 = Release|Any CPU
 		{89099FF5-6D08-481C-A2F8-E9B5A62DA091}.Release|x86.ActiveCfg = Release|Any CPU
 		{89099FF5-6D08-481C-A2F8-E9B5A62DA091}.Release|x86.Build.0 = Release|Any CPU
+		{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}.Debug|x64.Build.0 = Debug|Any CPU
+		{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}.Debug|x86.Build.0 = Debug|Any CPU
+		{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}.Release|x64.ActiveCfg = Release|Any CPU
+		{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}.Release|x64.Build.0 = Release|Any CPU
+		{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}.Release|x86.ActiveCfg = Release|Any CPU
+		{BF14E99D-641B-4FF8-9626-F16FE2FD42DA}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
