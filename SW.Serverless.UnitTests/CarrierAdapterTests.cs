@@ -14,6 +14,7 @@ using SW.Serverless.Samples.CarrierContract;
 using SW.Serverless.UnitTests.Fixtures;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -244,6 +245,37 @@ namespace SW.Serverless.UnitTests
             var logs = await second.InvokeAsync<JObject>("GetLogs");
             Assert.AreEqual(0, logs["Entries"].Count(),
                 "a fresh lease must start with an empty audit trail even on a reused process");
+        }
+
+        /// <summary>
+        /// ResetAsync must WAIT for the adapter to confirm, not merely queue the frame.
+        ///
+        /// It used to return a completed task the moment the frame was written, and AdapterPool
+        /// treated that as proof the session boundary had taken effect before putting the instance
+        /// back in the pool — so a later lease could be handed a process still carrying the
+        /// previous session's state.
+        ///
+        /// Asserted on elapsed time against an adapter whose reset deliberately takes 400ms,
+        /// because that is the property that actually changed. A pool-level test does not
+        /// discriminate: the adapter dispatches Reset before the next command anyway, so the old
+        /// code passed on ordering luck.
+        /// </summary>
+        [TestMethod]
+        public async Task Reset_waits_for_the_adapter_to_confirm_it()
+        {
+            var spec = Spec("slow-reset");
+            spec.StartupValues["ResetDelayMs"] = "400";
+
+            var instance = await adapters.StartExclusiveAsync(spec);
+
+            var clock = Stopwatch.StartNew();
+            await instance.ResetAsync("session-1");
+            clock.Stop();
+
+            Assert.IsTrue(clock.ElapsedMilliseconds >= 350,
+                $"ResetAsync returned in {clock.ElapsedMilliseconds}ms against a 400ms reset, so it " +
+                "did not wait for the adapter — the pool would hand this instance to the next " +
+                "session before the boundary had been applied");
         }
 
         [TestMethod]

@@ -108,10 +108,10 @@ namespace SW.Serverless.Samples.Carrier
         /// The session boundary the pooled shape depends on. The host calls this when a lease is
         /// returned, and the per-session audit trail goes with it.
         /// </summary>
-        public Task ResetAsync(string sessionId)
+        public async Task ResetAsync(string sessionId)
         {
+            if (options.ResetDelayMs > 0) await Task.Delay(options.ResetDelayMs);
             callLog.Clear(sessionId);
-            return Task.CompletedTask;
         }
 
         // ------------------------------------------------------------------ commands
