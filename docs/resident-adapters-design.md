@@ -76,11 +76,37 @@ runtime" requirement. But be clear about what is actually being bought and what 
 | | In-proc plugin (§4 as written) | Resident serverless adapter |
 |---|---|---|
 | Install without redeploy | No — assembly loaded at startup | **Yes** — already the whole point of `Install()` |
-| Non-.NET providers (Pulsar/Java, MQTT/Go, Python) | Impossible | **Yes**, via container launcher |
+| A provider whose only good client is not .NET | Impossible | Yes, via container launcher — but see 1.1: rarer than it sounds |
 | Native deps (librdkafka) | Loads into the host process | **Isolated**, and cappable |
 | Memory pressure from live connections | Lands on the Bitween node's heap | **Lands on a process you can `--memory` cap** |
 | A provider that crashes | Can take the node down | Kills one adapter, supervisor restarts it |
 | Provider versions side by side | ALC hell | Free — separate processes, separate dirs |
+
+### 1.1 Correction: "non-.NET" is the weakest argument for containers
+
+An earlier draft of this section claimed non-.NET clients made Pulsar, MQTT and others impossible
+in-process. That is wrong, and it oversold the container launcher. Every broker on the roadmap has
+a usable .NET client:
+
+| Broker | .NET client | Verdict |
+|---|---|---|
+| RabbitMQ | `RabbitMQ.Client` (official) | Pure managed. No container needed. |
+| MQTT | **MQTTnet** | Mature and widely used. No container needed. |
+| Pulsar | **DotPulsar** (official, under the Apache Pulsar project) | Covers the mainstream produce/consume path. The **Java** client is the reference implementation and leads on some features — check DotPulsar against what the Tuya pipeline actually needs before assuming either way. |
+| Kafka | `Confluent.Kafka` | The standard choice — but it wraps **librdkafka**, a native library. That is a *native dependency* argument, not a language one. |
+| Azure Event Hubs / Service Bus, Amazon SQS | first-party Azure and AWS SDKs | Pure managed. No container needed. |
+
+So the honest case for the container launcher is **not** language. It is:
+
+1. **Native dependencies** — librdkafka is `malloc`, invisible to `GCHeapHardLimit`, and platform-specific. This is the strongest reason and §11.1 depends on it.
+2. **Runtime and target-framework independence** — the strongest reason of all, and it is entirely a .NET problem: Gateway's image already ships two runtimes (`COPY --from=aspnet:6.0`) because the adapter fleet multi-targets. See §14.2.
+3. **Blast radius and resource limits for third-party provider code.**
+4. **A specific .NET client falling short of what a client needs** — real, but narrow, and it should be established per case rather than assumed.
+
+Language is the fallback, not the premise. This also reinforces §11.3: `systemd-run` should ship
+before `ContainerLauncher`, because most providers will never need a container at all.
+
+---
 
 That last-but-one row directly answers the node-pressure worry in §10 of the architecture doc:
 librdkafka's default `queued.max.messages.kbytes` is 64 MiB **per partition**. In-process, a
@@ -583,9 +609,13 @@ flowchart LR
 
 ## 8. Challenge 5 — the container launcher
 
-**Why it is worth having:** non-.NET provider clients (Pulsar's mature client is Java; good MQTT
-and Go clients exist), native dependencies like librdkafka, hard resource limits (`--memory`,
-`--cpus`, `--pids-limit`), and a real security boundary for third-party provider code.
+**Why it is worth having** — in the order the reasons actually carry weight (see §1.1):
+runtime and target-framework independence, so an adapter's TFM stops being the host image's
+problem; native dependencies like librdkafka, which escape `GCHeapHardLimit` and are
+platform-specific; hard resource limits (`--memory`, `--cpus`, `--pids-limit`); and a real
+security boundary for third-party provider code. A provider needing a non-.NET client is a
+genuine but uncommon fourth reason — every broker on the current roadmap has a usable .NET
+client.
 
 **What it costs, honestly:**
 
@@ -690,7 +720,8 @@ flowchart LR
 
 In §1 and §8 I attributed memory capping to containers. That is imprecise and worth correcting:
 **Docker's limits *are* cgroups.** You can have the same enforcement natively. What Docker
-uniquely buys is *packaging* — non-.NET runtimes, native deps, image distribution — not limits.
+uniquely buys is *packaging* — a self-contained runtime per adapter, native deps, and image
+distribution — not limits.
 That materially lowers the priority of the container launcher.
 
 Three layers, from portable to enforcing.
@@ -920,9 +951,10 @@ configured — a customer with no collector — the adapter falls back to stdio 
 reduced verbosity, and the `setLogLevel` control command turns detail on for one data source
 when someone is actually debugging.
 
-This also makes the polyglot story work: a Java Pulsar adapter or a Go MQTT adapter uses its own
-OTel SDK and lands in the same traces, which would be very awkward if all telemetry had to be
-tunnelled through a bespoke stdio frame format.
+It also keeps the door open cheaply: if some provider ever does need a non-.NET client, that
+adapter uses its own OTel SDK and lands in the same traces — which would be very awkward if all
+telemetry had to be tunnelled through a bespoke stdio frame format. That is a cheap option to
+hold, not a reason to build the container launcher.
 
 ### 12.4 The data path, and the copy worth eliminating
 
@@ -1146,7 +1178,9 @@ Ephemeral adapters keep the v1 line protocol verbatim. The §3 bugs still need f
   reason rather than an inference, `CrashLoopBackOff`, restart counts, pod events, and
   CPU/memory from `metrics.k8s.io`.
 * **Independent rollout.** Upgrade one provider without touching the Bitween deployment.
-* **Polyglot for real** — a Java Pulsar client or a Go MQTT client is just another image.
+* **Each adapter carries its own runtime**, so a target framework stops being the host image's
+  problem — the concrete pain behind Gateway's `COPY --from=aspnet:6.0` (§14.2). A non-.NET
+  client, in the uncommon case one is needed, is then just another image.
 
 ### 13.5 What it costs — stated plainly
 
