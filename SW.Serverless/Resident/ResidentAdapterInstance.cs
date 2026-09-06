@@ -35,6 +35,7 @@ namespace SW.Serverless.Resident
             new UnboundedChannelOptions { SingleReader = true });
 
         readonly ConcurrentQueue<string> diagnostics = new();
+        readonly SemaphoreSlim inbound;
         readonly TaskCompletionSource<bool> attached =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -51,6 +52,7 @@ namespace SW.Serverless.Resident
             Token = token;
             this.options = options;
             this.sink = sink;
+            inbound = new SemaphoreSlim(Math.Max(1, options.MaxInFlight));
             logger = loggerFactory.CreateLogger<ResidentAdapterInstance>();
             adapterLogger = loggerFactory.CreateLogger($"serverless.adapters.{adapterId}".ToLowerInvariant());
         }
@@ -98,8 +100,20 @@ namespace SW.Serverless.Resident
             linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             writerTask = Task.Run(async () =>
             {
-                await foreach (var frame in outbound.Reader.ReadAllAsync(linkedCts.Token))
-                    await output.WriteAsync(frame);
+                try
+                {
+                    await foreach (var frame in outbound.Reader.ReadAllAsync(linkedCts.Token))
+                        await output.WriteAsync(frame);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    // A writer that dies silently leaves every subsequent call to hang until its
+                    // own timeout. Treat it as what it is: the stream is gone.
+                    logger.LogWarning(ex, "Outbound writer for {AdapterId}/{InstanceKey} failed.",
+                        AdapterId, InstanceKey);
+                    linkedCts.Cancel();
+                }
             }, linkedCts.Token);
 
             State = InstanceState.Attached;
@@ -143,11 +157,19 @@ namespace SW.Serverless.Resident
             }
         }
 
-        Task OnFrameAsync(AdapterFrame frame, CancellationToken ct)
+        async Task OnFrameAsync(AdapterFrame frame, CancellationToken ct)
         {
             switch (frame.BodyCase)
             {
                 case AdapterFrame.BodyOneofCase.InvokeResult:
+                    // Match on kind too. Ids are unique across calls today, but resolving a
+                    // pending Invoke from whatever frame happens to carry its id is the same class
+                    // of defect as the v1 single-completion-source, and worth closing by shape
+                    // rather than by trusting the adapter to behave.
+                    if (pending.TryGetValue(frame.Id, out var expecting)
+                        && expecting.Kind is CallKind.Ping)
+                        break;
+
                     if (pending.TryRemove(frame.Id, out var call))
                     {
                         call.Timer?.Dispose();
@@ -164,6 +186,10 @@ namespace SW.Serverless.Resident
 
                 case AdapterFrame.BodyOneofCase.Pong:
                     LastStatus = frame.Pong;
+                    if (pending.TryGetValue(frame.Id, out var expectingPong)
+                        && expectingPong.Kind is not CallKind.Ping)
+                        break;
+
                     if (pending.TryRemove(frame.Id, out var ping))
                     {
                         ping.Timer?.Dispose();
@@ -172,8 +198,16 @@ namespace SW.Serverless.Resident
                     break;
 
                 case AdapterFrame.BodyOneofCase.Event:
-                    // Not awaited: several events may be in flight up to the credit window.
-                    _ = Task.Run(() => HandleEventAsync(frame, ct), ct);
+                    // Not awaited, so several events run concurrently — but bounded by the same
+                    // window the adapter was granted. Without this the host advertised a credit
+                    // limit and then accepted unbounded concurrency from an adapter that ignored
+                    // it, which is the failure mode the window exists to prevent.
+                    await inbound.WaitAsync(ct);
+                    _ = Task.Run(async () =>
+                    {
+                        try { await HandleEventAsync(frame, ct); }
+                        finally { inbound.Release(); }
+                    }, ct);
                     break;
 
                 case AdapterFrame.BodyOneofCase.Log:
@@ -184,8 +218,6 @@ namespace SW.Serverless.Resident
                     AdapterMetrics.Record(AdapterId, InstanceKey, frame.Metric);
                     break;
             }
-
-            return Task.CompletedTask;
         }
 
         async Task HandleEventAsync(AdapterFrame frame, CancellationToken ct)
@@ -259,6 +291,7 @@ namespace SW.Serverless.Resident
             var id = Interlocked.Increment(ref nextId);
             var call = new PendingCall
             {
+                Kind = CallKind.Invoke,
                 Completion = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously)
             };
             pending[id] = call;
@@ -272,8 +305,11 @@ namespace SW.Serverless.Resident
             call.Timer = new Timer(_ =>
             {
                 if (pending.TryRemove(id, out var c))
+                {
+                    c.Timer?.Dispose();
                     c.Completion.TrySetException(new TimeoutException(
                         $"Adapter '{AdapterId}' did not answer '{command}' within {timeout}."));
+                }
             }, null, timeout, Timeout.InfiniteTimeSpan);
 
             Send(new HostFrame
@@ -291,10 +327,15 @@ namespace SW.Serverless.Resident
 
             using (cancellationToken.Register(() =>
             {
-                if (pending.TryRemove(id, out var c)) c.Completion.TrySetCanceled();
+                if (pending.TryRemove(id, out var c))
+                {
+                    c.Timer?.Dispose();
+                    c.Completion.TrySetCanceled();
+                }
             }))
             {
-                return await call.Completion.Task;
+                try { return await call.Completion.Task; }
+                finally { call.Timer?.Dispose(); }
             }
         }
 
@@ -303,13 +344,17 @@ namespace SW.Serverless.Resident
             var id = Interlocked.Increment(ref nextId);
             var call = new PendingCall
             {
+                Kind = CallKind.Ping,
                 Completion = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously)
             };
             pending[id] = call;
             call.Timer = new Timer(_ =>
             {
                 if (pending.TryRemove(id, out var c))
+                {
+                    c.Timer?.Dispose();
                     c.Completion.TrySetException(new TimeoutException("Heartbeat timed out."));
+                }
             }, null, timeout, Timeout.InfiniteTimeSpan);
 
             Send(new HostFrame { Id = id, Ping = new Ping() });
@@ -317,10 +362,51 @@ namespace SW.Serverless.Resident
             return LastStatus;
         }
 
-        public Task ResetAsync(string sessionId)
+        /// <summary>
+        /// Waits for the adapter to confirm the reset. Fire-and-forget was wrong: the pool treated
+        /// a completed task as proof the session boundary had taken effect and returned the
+        /// instance to idle, so the next lease could be handed a process that had not yet cleared
+        /// the previous session's state — the exact leak the boundary exists to prevent.
+        /// </summary>
+        public async Task ResetAsync(string sessionId, TimeSpan? timeout = null,
+            CancellationToken cancellationToken = default)
         {
-            Send(new HostFrame { Reset = new Reset { SessionId = sessionId } });
-            return Task.CompletedTask;
+            if (State != InstanceState.Ready)
+                throw new InvalidOperationException($"Adapter {AdapterId} is {State}, not Ready.");
+
+            var id = Interlocked.Increment(ref nextId);
+            var call = new PendingCall
+            {
+                Kind = CallKind.Reset,
+                Completion = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously)
+            };
+            pending[id] = call;
+
+            var deadline = timeout ?? TimeSpan.FromSeconds(15);
+            call.Timer = new Timer(_ =>
+            {
+                if (pending.TryRemove(id, out var c))
+                {
+                    c.Timer?.Dispose();
+                    c.Completion.TrySetException(new TimeoutException(
+                        $"Adapter '{AdapterId}' did not confirm the session reset within {deadline}."));
+                }
+            }, null, deadline, Timeout.InfiniteTimeSpan);
+
+            Send(new HostFrame { Id = id, Reset = new Reset { SessionId = sessionId ?? "" } });
+
+            using (cancellationToken.Register(() =>
+            {
+                if (pending.TryRemove(id, out var c))
+                {
+                    c.Timer?.Dispose();
+                    c.Completion.TrySetCanceled();
+                }
+            }))
+            {
+                try { await call.Completion.Task; }
+                finally { call.Timer?.Dispose(); }
+            }
         }
 
         public Task SetLogLevelAsync(LogLevel level)
@@ -369,10 +455,13 @@ namespace SW.Serverless.Resident
             linkedCts?.Dispose();
         }
 
+        enum CallKind { Invoke, Ping, Reset }
+
         sealed class PendingCall
         {
             public TaskCompletionSource<byte[]> Completion;
             public Timer Timer;
+            public CallKind Kind;
         }
     }
 

@@ -48,6 +48,12 @@ namespace SW.Serverless.Samples.FolderSource
             pattern = context.StartupValueOf("Pattern") ?? pattern;
             if (int.TryParse(context.StartupValueOf("PollSeconds"), out var p) && p > 0) pollSeconds = p;
 
+            if (Path.GetFullPath(archive).TrimEnd(Path.DirectorySeparatorChar) ==
+                Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar))
+                throw new InvalidOperationException(
+                    "ArchivePath must differ from Path; archiving into the watched folder would " +
+                    "re-deliver every file for ever.");
+
             Directory.CreateDirectory(root);
             Directory.CreateDirectory(archive);
 
@@ -70,8 +76,16 @@ namespace SW.Serverless.Samples.FolderSource
 
         public Task<AdapterStatus> GetStatusAsync()
         {
+            // Counted with a cap rather than materialised: GetFiles on a folder holding a hundred
+            // thousand files turns every heartbeat into a directory walk, and a heartbeat that is
+            // slow enough to miss its deadline gets a healthy adapter restarted.
             var pending = 0;
-            try { pending = Directory.Exists(root) ? Directory.GetFiles(root, pattern).Length : 0; }
+            try
+            {
+                if (Directory.Exists(root))
+                    foreach (var _ in Directory.EnumerateFiles(root, pattern))
+                        if (++pending >= 1000) break;
+            }
             catch { /* status must never throw */ }
 
             var status = new AdapterStatus

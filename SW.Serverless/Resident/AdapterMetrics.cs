@@ -15,13 +15,27 @@ namespace SW.Serverless.Resident
         static readonly Dictionary<string, Counter<double>> counters = new();
         static readonly object gate = new();
 
+        /// <summary>
+        /// Instrument names and tags come from the adapter, so both are bounded here. An adapter
+        /// that derives a metric name or a tag from message content would otherwise create an
+        /// unbounded number of time series and take the metrics backend with it.
+        /// </summary>
+        const int MaxInstruments = 200;
+        const int MaxTagsPerMetric = 10;
+        const int MaxTagValueLength = 120;
+
         public static void Record(string adapterId, string instanceKey, Metric metric)
         {
+            if (string.IsNullOrWhiteSpace(metric?.Name)) return;
+
             Counter<double> counter;
             lock (gate)
             {
                 if (!counters.TryGetValue(metric.Name, out counter))
+                {
+                    if (counters.Count >= MaxInstruments) return;
                     counters[metric.Name] = counter = Meter.CreateCounter<double>(metric.Name);
+                }
             }
 
             var tags = new List<KeyValuePair<string, object>>
@@ -29,7 +43,13 @@ namespace SW.Serverless.Resident
                 new("adapter.id", adapterId),
                 new("adapter.instance", instanceKey)
             };
-            foreach (var kv in metric.Tags) tags.Add(new KeyValuePair<string, object>(kv.Key, kv.Value));
+            foreach (var kv in metric.Tags)
+            {
+                if (tags.Count >= MaxTagsPerMetric + 2) break;
+                var value = kv.Value ?? "";
+                if (value.Length > MaxTagValueLength) value = value[..MaxTagValueLength];
+                tags.Add(new KeyValuePair<string, object>(kv.Key, value));
+            }
 
             counter.Add(metric.Value, tags.ToArray());
         }

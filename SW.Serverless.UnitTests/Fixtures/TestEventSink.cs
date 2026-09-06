@@ -35,15 +35,20 @@ namespace SW.Serverless.UnitTests.Fixtures
                 return Task.FromResult(EventOutcome.Rejected("rejected by the test"));
             }
 
-            if (!string.IsNullOrEmpty(e.DedupeKey) && persisted.TryGetValue(e.DedupeKey, out var already))
-            {
-                Interlocked.Increment(ref DuplicateCount);
-                delivered.Enqueue(new Delivered(e.AdapterId, e.Endpoint, e.DedupeKey, body, true));
-                return Task.FromResult(EventOutcome.Ok(already));
-            }
-
+            // Check-then-act was racy: two concurrent deliveries of the same key could both miss
+            // and both be persisted, which is precisely the bug a dedupe test exists to catch.
             var reference = $"ref-{Interlocked.Increment(ref sequence)}";
-            if (!string.IsNullOrEmpty(e.DedupeKey)) persisted[e.DedupeKey] = reference;
+
+            if (!string.IsNullOrEmpty(e.DedupeKey))
+            {
+                var winner = persisted.GetOrAdd(e.DedupeKey, reference);
+                if (!ReferenceEquals(winner, reference) && winner != reference)
+                {
+                    Interlocked.Increment(ref DuplicateCount);
+                    delivered.Enqueue(new Delivered(e.AdapterId, e.Endpoint, e.DedupeKey, body, true));
+                    return Task.FromResult(EventOutcome.Ok(winner));
+                }
+            }
 
             delivered.Enqueue(new Delivered(e.AdapterId, e.Endpoint, e.DedupeKey, body, true));
             return Task.FromResult(EventOutcome.Ok(reference));

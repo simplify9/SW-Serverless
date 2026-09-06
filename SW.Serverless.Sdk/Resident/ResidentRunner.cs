@@ -37,10 +37,16 @@ namespace SW.Serverless.Sdk.Resident
         IResidentAdapter resident;
         IResettable resettable;
 
-        readonly Channel<AdapterFrame> outbound =
+        // Two channels, because they have opposite requirements. Telemetry is droppable and must
+        // never apply backpressure to the data path; events and command results must never be
+        // dropped. Sharing one channel meant a log storm could still block an event write even
+        // though the logs themselves were droppable.
+        readonly Channel<AdapterFrame> priority =
+            Channel.CreateUnbounded<AdapterFrame>(new UnboundedChannelOptions { SingleReader = true });
+
+        readonly Channel<AdapterFrame> telemetry =
             Channel.CreateBounded<AdapterFrame>(new BoundedChannelOptions(2048)
             {
-                // Logging must never apply backpressure to the data path — design doc 12.2.
                 FullMode = BoundedChannelFullMode.DropWrite
             });
 
@@ -133,7 +139,8 @@ namespace SW.Serverless.Sdk.Resident
             await ReadLoopAsync(call.ResponseStream);
 
             stopping.Cancel();
-            outbound.Writer.TryComplete();
+            priority.Writer.TryComplete();
+            telemetry.Writer.TryComplete();
             await Task.WhenAny(writer, Task.Delay(2000));
             try { await call.RequestStream.CompleteAsync(); } catch { /* already torn down */ }
             _ = stdinWatch;
@@ -179,7 +186,10 @@ namespace SW.Serverless.Sdk.Resident
                         break;
 
                     case HostFrame.BodyOneofCase.Reset:
-                        if (resettable != null) await resettable.ResetAsync(frame.Reset.SessionId);
+                        // Answered, not fire-and-forget. The pool waits for this before handing the
+                        // process to another session; without the reply it could hand over a
+                        // process that has not yet cleared the previous session's state.
+                        _ = Task.Run(() => OnResetAsync(frame.Id, frame.Reset.SessionId));
                         break;
 
                     case HostFrame.BodyOneofCase.Shutdown:
@@ -302,15 +312,39 @@ namespace SW.Serverless.Sdk.Resident
             Send(new AdapterFrame { Id = id, Pong = pong });
         }
 
+        async Task OnResetAsync(long id, string sessionId)
+        {
+            var result = new InvokeResult();
+            try
+            {
+                if (resettable != null) await resettable.ResetAsync(sessionId);
+            }
+            catch (Exception ex)
+            {
+                result.Error = new Error
+                {
+                    Type = ex.GetType().FullName ?? "Exception",
+                    Message = ex.Message ?? "",
+                    Detail = ex.ToString()
+                };
+            }
+
+            Send(new AdapterFrame { Id = id, InvokeResult = result });
+        }
+
         async Task OnShutdownAsync(Shutdown shutdown)
         {
-            stopping.Cancel();
+            // Cancelling `stopping` FIRST made drain impossible: the adapter's own token — the one
+            // its consume loop and PublishAsync calls observe — was already cancelled, so there
+            // was nothing left to finish. Ask it to stop, let it drain, and only then cancel.
             if (resident != null)
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(shutdown.Drain ? 30 : 5));
                 try { await resident.StopAsync(cts.Token); }
                 catch (Exception ex) { AdapterLogger.LogWarning(ex, "StopAsync threw."); }
             }
+
+            stopping.Cancel();
         }
 
         /// <summary>If the host dies our stdin reaches EOF. Exit rather than orphan-spin.</summary>
@@ -323,19 +357,44 @@ namespace SW.Serverless.Sdk.Resident
 
         // ------------------------------------------------------------------ outbound
 
-        void Send(AdapterFrame frame)
+        /// <summary>Command results, pongs and events. Never dropped.</summary>
+        void Send(AdapterFrame frame) => priority.Writer.TryWrite(frame);
+
+        /// <summary>Logs and metrics. Dropped rather than allowed to block anything.</summary>
+        void SendTelemetry(AdapterFrame frame)
         {
-            if (!outbound.Writer.TryWrite(frame))
+            if (!telemetry.Writer.TryWrite(frame))
                 Interlocked.Increment(ref droppedFrames);
         }
 
+        /// <summary>
+        /// One writer for both channels, because a gRPC request stream is not safe for concurrent
+        /// writes. Priority frames are drained first so a telemetry backlog cannot delay a
+        /// heartbeat response and get a healthy adapter restarted.
+        /// </summary>
         async Task PumpOutboundAsync(IClientStreamWriter<AdapterFrame> stream)
         {
             try
             {
-                await foreach (var frame in outbound.Reader.ReadAllAsync())
-                    await stream.WriteAsync(frame);
+                while (!stopping.IsCancellationRequested)
+                {
+                    while (priority.Reader.TryRead(out var urgent))
+                        await stream.WriteAsync(urgent);
+
+                    if (telemetry.Reader.TryRead(out var frame))
+                    {
+                        await stream.WriteAsync(frame);
+                        continue;
+                    }
+
+                    var ready = await Task.WhenAny(
+                        priority.Reader.WaitToReadAsync(stopping.Token).AsTask(),
+                        telemetry.Reader.WaitToReadAsync(stopping.Token).AsTask());
+
+                    if (!await ready) break;
+                }
             }
+            catch (OperationCanceledException) { }
             catch (Exception ex)
             {
                 AdapterLogger.LogWarning(ex, "Outbound pump stopped.");
@@ -377,19 +436,27 @@ namespace SW.Serverless.Sdk.Resident
                 if (headers != null)
                     foreach (var kv in headers) ev.Headers[kv.Key] = kv.Value ?? "";
 
-                // Bypass the droppable channel: an event must never be silently dropped.
-                await outbound.Writer.WriteAsync(new AdapterFrame { Id = id, Event = ev }, cancellationToken);
-
-                using (cancellationToken.Register(() => tcs.TrySetCanceled()))
-                using (stopping.Token.Register(() => tcs.TrySetCanceled()))
+                try
                 {
-                    var ack = await tcs.Task;
-                    return new PublishResult
+                    Send(new AdapterFrame { Id = id, Event = ev });
+
+                    using (cancellationToken.Register(() => tcs.TrySetCanceled()))
+                    using (stopping.Token.Register(() => tcs.TrySetCanceled()))
                     {
-                        Accepted = ack.Accepted,
-                        Reference = ack.Reference,
-                        Error = ack.Error?.Message
-                    };
+                        var ack = await tcs.Task;
+                        return new PublishResult
+                        {
+                            Accepted = ack.Accepted,
+                            Reference = ack.Reference,
+                            Error = ack.Error?.Message
+                        };
+                    }
+                }
+                finally
+                {
+                    // Removed on every path, not only on ack. Leaving cancelled entries behind
+                    // grows the dictionary for the life of a process meant to run for weeks.
+                    pendingEvents.TryRemove(id, out _);
                 }
             }
             finally
@@ -413,7 +480,7 @@ namespace SW.Serverless.Sdk.Resident
             if (properties != null)
                 foreach (var kv in properties) entry.Properties[kv.Key] = kv.Value ?? "";
 
-            Send(new AdapterFrame { Log = entry });
+            SendTelemetry(new AdapterFrame { Log = entry });
         }
 
         public void LogInformation(string message, IDictionary<string, string> properties = null) =>
@@ -430,7 +497,7 @@ namespace SW.Serverless.Sdk.Resident
             var m = new Metric { Name = name, Value = value };
             if (tags != null)
                 foreach (var kv in tags) m.Tags[kv.Key] = kv.Value ?? "";
-            Send(new AdapterFrame { Metric = m });
+            SendTelemetry(new AdapterFrame { Metric = m });
         }
 
         // ------------------------------------------------------------------ command discovery
@@ -478,12 +545,22 @@ namespace SW.Serverless.Sdk.Resident
                     {
                         var pipe = new NamedPipeClientStream(".", handshake.Pipe,
                             PipeDirection.InOut, PipeOptions.WriteThrough | PipeOptions.Asynchronous);
-                        await pipe.ConnectAsync(ct);
+                        try { await pipe.ConnectAsync(ct); }
+                        catch { await pipe.DisposeAsync(); throw; }
                         return pipe;
                     }
 
                     var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-                    await socket.ConnectAsync(new UnixDomainSocketEndPoint(handshake.Socket), ct);
+                    try
+                    {
+                        await socket.ConnectAsync(new UnixDomainSocketEndPoint(handshake.Socket), ct);
+                    }
+                    catch
+                    {
+                        // A retried connect would otherwise leak a handle on every attempt.
+                        socket.Dispose();
+                        throw;
+                    }
                     return new NetworkStream(socket, ownsSocket: true);
                 }
             };
