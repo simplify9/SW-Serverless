@@ -46,6 +46,18 @@ namespace SW.Serverless.Resident
                 .Select(c => c["command:".Length..])
                 .OrderBy(c => c)
                 .ToArray();
+            instance.CommandDetails = first.Hello.Commands
+                .Select(c => new AdapterCommand
+                {
+                    Name = c.Name,
+                    ParameterType = c.ParameterType,
+                    ParameterSchema = c.ParameterSchema,
+                    ReturnsValue = c.ReturnsValue,
+                    Description = c.Description
+                })
+                .OrderBy(c => c.Name)
+                .ToArray();
+
             instance.SdkVersion = first.Hello.SdkVersion;
             instance.ProtocolVersion = first.Hello.ProtocolVersion;
 

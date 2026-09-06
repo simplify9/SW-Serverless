@@ -453,6 +453,7 @@ namespace SW.Serverless.Resident
                 LastHeartbeatOn = supervised.LastHeartbeatOn,
                 Capabilities = instance.Capabilities,
                 Commands = instance.Commands,
+                CommandDetails = instance.CommandDetails,
                 SdkVersion = instance.SdkVersion,
                 ProtocolVersion = instance.ProtocolVersion,
                 StartupValues = instance.StartupValues,

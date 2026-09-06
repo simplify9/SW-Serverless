@@ -132,7 +132,8 @@ namespace SW.Serverless.Sdk.Resident
                     InstanceKey = handshake.InstanceKey ?? "",
                     ProtocolVersion = ProtocolVersion,
                     SdkVersion = typeof(ResidentRunner).Assembly.GetName().Version?.ToString() ?? "0.0.0",
-                    Capabilities = { Capabilities() }
+                    Capabilities = { Capabilities() },
+                    Commands = { CommandInfos() }
                 }
             });
 
@@ -144,6 +145,73 @@ namespace SW.Serverless.Sdk.Resident
             await Task.WhenAny(writer, Task.Delay(2000));
             try { await call.RequestStream.CompleteAsync(); } catch { /* already torn down */ }
             _ = stdinWatch;
+        }
+
+        /// <summary>
+        /// The same commands `capabilities` names, with the shape a caller needs to actually
+        /// invoke one: whether it takes an argument, what that argument looks like, and whether
+        /// anything comes back.
+        /// </summary>
+        IEnumerable<CommandInfo> CommandInfos()
+        {
+            foreach (var pair in commands)
+            {
+                var method = pair.Value.MethodInfo;
+                var parameterType = pair.Value.ParameterType;
+
+                var info = new CommandInfo
+                {
+                    Name = pair.Key,
+                    ParameterType = parameterType?.Name ?? "",
+                    ParameterSchema = DescribeParameter(parameterType),
+                    ReturnsValue = !pair.Value.Void,
+                    Description = method.GetCustomAttribute<AdapterCommandAttribute>()?.Description ?? ""
+                };
+
+                yield return info;
+            }
+        }
+
+        /// <summary>
+        /// A complex argument's public properties as name -> type, so a UI can build a form for a
+        /// command it has never seen. Primitives and strings describe themselves through
+        /// ParameterType, so they get nothing here rather than a pointless one-entry object.
+        /// </summary>
+        static string DescribeParameter(Type parameterType)
+        {
+            if (parameterType == null) return "";
+            if (parameterType.IsPrimitive || parameterType == typeof(string) ||
+                parameterType == typeof(decimal) || parameterType == typeof(DateTime) ||
+                parameterType == typeof(Guid))
+                return "";
+
+            try
+            {
+                var properties = parameterType
+                    .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .Where(p => p.CanRead)
+                    .ToDictionary(p => p.Name, p => FriendlyName(p.PropertyType));
+
+                return properties.Count == 0
+                    ? ""
+                    : System.Text.Json.JsonSerializer.Serialize(properties);
+            }
+            catch
+            {
+                // Describing an argument must never stop an adapter attaching.
+                return "";
+            }
+        }
+
+        static string FriendlyName(Type type)
+        {
+            var underlying = Nullable.GetUnderlyingType(type);
+            if (underlying != null) return FriendlyName(underlying) + "?";
+            if (type.IsArray) return FriendlyName(type.GetElementType()) + "[]";
+            if (type.IsGenericType)
+                return type.Name.Split('`')[0] + "<" +
+                       string.Join(", ", type.GetGenericArguments().Select(FriendlyName)) + ">";
+            return type.Name;
         }
 
         IEnumerable<string> Capabilities()

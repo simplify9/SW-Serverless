@@ -88,6 +88,34 @@ message Hello {
     int32 protocol_version = 4;
     string sdk_version = 5;
     repeated string capabilities = 6;
+
+    // What this adapter can be asked to do, in enough detail to call it without reading its
+    // source. `capabilities` already carries the names as "command:X" and stays as it is for
+    // adapters and hosts built before this field existed; a host that understands this one gets
+    // the shape as well as the name.
+    repeated CommandInfo commands = 7;
+}
+
+// One callable command on an adapter.
+message CommandInfo {
+    string name = 1;
+
+    // The .NET type name of the single argument, or empty when the command takes none. Present so
+    // a caller knows there IS an argument; `parameter_schema` says what it looks like.
+    string parameter_type = 2;
+
+    // The argument's public properties as a JSON object of name -> type, so a UI can build a form
+    // for a command it has never seen. Empty for a primitive or absent argument, where
+    // `parameter_type` already says everything.
+    string parameter_schema = 3;
+
+    // False for a command that returns Task rather than Task<T> — worth knowing before waiting
+    // for an answer that is never coming.
+    bool returns_value = 4;
+
+    // From [AdapterCommand(Description = "…")] on the method. Optional, and worth setting: the
+    // difference between a list of names and a list an operator can act on.
+    string description = 5;
 }
 
 message InvokeResult {

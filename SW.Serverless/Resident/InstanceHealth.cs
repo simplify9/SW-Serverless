@@ -38,6 +38,14 @@ namespace SW.Serverless.Resident
         // Advertised by the adapter on attach
         public IReadOnlyCollection<string> Capabilities { get; set; } = Array.Empty<string>();
         public IReadOnlyCollection<string> Commands { get; set; } = Array.Empty<string>();
+
+        /// <summary>
+        /// The commands with their shapes — argument type, argument schema, whether anything is
+        /// returned. Empty for an adapter built against an older SDK, where <see cref="Commands"/>
+        /// still carries the names.
+        /// </summary>
+        public IReadOnlyCollection<AdapterCommand> CommandDetails { get; set; }
+            = Array.Empty<AdapterCommand>();
         public string SdkVersion { get; set; }
         public int ProtocolVersion { get; set; }
         public IReadOnlyDictionary<string, string> StartupValues { get; set; }

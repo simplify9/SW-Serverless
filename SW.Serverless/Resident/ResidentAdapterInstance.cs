@@ -76,6 +76,14 @@ namespace SW.Serverless.Resident
 
         public IReadOnlyCollection<string> Commands { get; internal set; } = Array.Empty<string>();
 
+        /// <summary>
+        /// The same commands with their shapes. Empty for an adapter built against an SDK from
+        /// before command descriptors existed — <see cref="Commands"/> still carries the names, so
+        /// an older adapter degrades to what was always there rather than to nothing.
+        /// </summary>
+        public IReadOnlyCollection<AdapterCommand> CommandDetails { get; internal set; }
+            = Array.Empty<AdapterCommand>();
+
         public string SdkVersion { get; internal set; }
         public int ProtocolVersion { get; internal set; }
         public IReadOnlyDictionary<string, string> AdapterValues { get; internal set; }

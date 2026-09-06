@@ -1,3 +1,4 @@
+using SW.Serverless.Sdk;
 using SW.Serverless.Sdk.Resident;
 
 namespace SW.Serverless.Samples.Greedy;
@@ -72,6 +73,7 @@ public class GreedyHandler : IResidentAdapter
     // ---------------------------------------------------------------- commands
 
     /// <summary>Holds another <paramref name="megabytes"/> so the process's RSS actually grows.</summary>
+    [AdapterCommand("Holds another N megabytes, so the process's resident set actually grows.")]
     public Task<object> Allocate(int megabytes)
     {
         AllocateCore(megabytes);
@@ -99,6 +101,7 @@ public class GreedyHandler : IResidentAdapter
     }
 
     /// <summary>Lets go of everything, so a test can prove a ceiling stops tripping.</summary>
+    [AdapterCommand("Releases everything held and collects, so the ceiling stops tripping.")]
     public Task<object> Release()
     {
         lock (_gate) _held.Clear();
@@ -135,6 +138,25 @@ public class GreedyHandler : IResidentAdapter
         });
     }
 
+    /// <summary>
+    /// Takes a shaped argument rather than a primitive, so command discovery has something whose
+    /// schema is worth reporting — a caller can build a form for this without seeing the source.
+    /// </summary>
+    [AdapterCommand("Allocates and optionally burns CPU in one call.")]
+    public Task<object> Strain(StrainRequest request)
+    {
+        if (request == null) return Task.FromResult<object>(new { ok = false });
+
+        if (request.AllocateMb > 0) AllocateCore(request.AllocateMb);
+        if (request.BurnSeconds > 0) StartBurn(request.BurnSeconds);
+
+        return Task.FromResult<object>(new
+        {
+            allocatedMb = Interlocked.Read(ref _allocatedMb),
+            burning = _burn is { IsCompleted: false },
+        });
+    }
+
     public Task<object> GetStats() => Task.FromResult<object>(new
     {
         allocatedMb = Interlocked.Read(ref _allocatedMb),
@@ -142,4 +164,12 @@ public class GreedyHandler : IResidentAdapter
         burning = _burn is { IsCompleted: false },
         state = _state,
     });
+}
+
+/// <summary>The shaped argument for <see cref="GreedyHandler.Strain"/>.</summary>
+public class StrainRequest
+{
+    public int AllocateMb { get; set; }
+    public double BurnSeconds { get; set; }
+    public string Note { get; set; }
 }
