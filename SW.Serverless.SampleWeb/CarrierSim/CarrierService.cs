@@ -19,6 +19,11 @@ namespace SW.Serverless.SampleWeb.CarrierSim
     {
         // gRPC services are resolved per call, so instance state would vanish between them.
         static readonly ConcurrentDictionary<string, ShipmentRecord> shipments = new();
+
+        // Reference -> tracking number. Real carriers offer exactly this so a client that retries
+        // a timed-out create does not end up with two shipments; without it, no caller can safely
+        // retry CreateShipment at all.
+        static readonly ConcurrentDictionary<string, ShipmentRecord> byReference = new();
         readonly ILogger<CarrierService> logger;
 
         public CarrierService(ILogger<CarrierService> logger) => this.logger = logger;
@@ -50,6 +55,16 @@ namespace SW.Serverless.SampleWeb.CarrierSim
                     ErrorMessage = "At least one parcel is required."
                 };
 
+            var invalid = request.Parcels.FirstOrDefault(
+                p => double.IsNaN(p.WeightKg) || double.IsInfinity(p.WeightKg) || p.WeightKg <= 0);
+            if (invalid != null)
+                return new CreateShipmentReply
+                {
+                    Accepted = false,
+                    ErrorCode = "INVALID_WEIGHT",
+                    ErrorMessage = $"{invalid.WeightKg} kg is not a usable parcel weight."
+                };
+
             var overweight = request.Parcels.FirstOrDefault(p => p.WeightKg > 31.5);
             if (overweight != null)
                 return new CreateShipmentReply
@@ -59,15 +74,46 @@ namespace SW.Serverless.SampleWeb.CarrierSim
                     ErrorMessage = $"{overweight.WeightKg} kg exceeds the 31.5 kg limit for this service."
                 };
 
-            var tracking = $"SW{Random.Shared.NextInt64(100000000, 999999999)}";
             var price = Math.Round(4.50 + request.Parcels.Sum(p => p.WeightKg) * 0.85, 2);
 
-            shipments[tracking] = new ShipmentRecord
+            var record = new ShipmentRecord
             {
                 Reference = request.Reference,
                 CreatedOn = DateTimeOffset.UtcNow,
                 Destination = request.Recipient?.City ?? "unknown"
             };
+
+            // A repeat of a reference we already booked returns the original shipment rather than
+            // creating a second one. This is what makes the adapter's retry safe.
+            if (!string.IsNullOrWhiteSpace(request.Reference))
+            {
+                var winner = byReference.GetOrAdd(request.Reference, record);
+                if (!ReferenceEquals(winner, record))
+                {
+                    logger.LogInformation("Carrier replayed {Reference} as {Tracking}.",
+                        request.Reference, winner.TrackingNumber);
+                    return new CreateShipmentReply
+                    {
+                        Accepted = true,
+                        TrackingNumber = winner.TrackingNumber,
+                        LabelUrl = $"https://carrier.test/labels/{winner.TrackingNumber}.pdf",
+                        Price = winner.Price,
+                        Currency = "EUR"
+                    };
+                }
+            }
+
+            // TryAdd rather than the indexer: a repeated random number would otherwise replace an
+            // existing shipment, and tracking and cancellation would then act on the wrong one.
+            string tracking;
+            while (true)
+            {
+                tracking = $"SW{Random.Shared.NextInt64(100000000, 999999999)}";
+                if (shipments.TryAdd(tracking, record)) break;
+            }
+
+            record.TrackingNumber = tracking;
+            record.Price = price;
 
             logger.LogInformation("Carrier accepted {Reference} as {Tracking} for {Price} EUR.",
                 request.Reference, tracking, price);
@@ -146,6 +192,8 @@ namespace SW.Serverless.SampleWeb.CarrierSim
             public string Reference;
             public DateTimeOffset CreatedOn;
             public string Destination;
+            public string TrackingNumber;
+            public double Price;
         }
     }
 }

@@ -6,6 +6,15 @@
 @inject DemoBootstrapper Bootstrapper
 
 <h1>Adapters</h1>
+
+<div class="banner warn">
+    <strong>Unauthenticated developer tool.</strong> Every control on this page acts without an
+    identity check: commands reach adapters, <em>Kill</em> ends process trees, and the carrier
+    simulator's shared state can be mutated by anyone who can reach the port. Run it on loopback
+    only. Ported into a real host, these controls need an operator policy enforced at each one —
+    the sample leaves that out so the observability it is demonstrating stays legible.
+</div>
+
 <p class="lede">
     Every figure below comes from one of two independent sources. <strong>Host-observed</strong>
     (memory, CPU, threads, restarts) needs no cooperation from the adapter, so it still works when
@@ -270,11 +279,18 @@
 
     async Task Drain(InstanceHealth h)
     {
-        var instance = Host.Get(h.AdapterId, h.InstanceKey);
-        if (instance is null) return;
-        await instance.SetLogLevelAsync(Microsoft.Extensions.Logging.LogLevel.Information);
-        results[Id(h)] = "Drain requested via the supervisor's soft path — the adapter stops "
-                       + "fetching, finishes what is in flight, then exits. A hard kill cannot do that.";
+        // The soft path: StopAsync(drain: true) is what tells the adapter to stop fetching and
+        // finish what is in flight. Anything else here would be a button that only claims to drain.
+        try
+        {
+            await Host.StopAsync(h.AdapterId, h.InstanceKey, drain: true);
+            results[Id(h)] = "Drain requested via the supervisor's soft path — the adapter stopped "
+                           + "fetching, finished what was in flight, then exited. A hard kill cannot do that.";
+        }
+        catch (Exception ex)
+        {
+            results[Id(h)] = $"ERROR  {ex.Message}";
+        }
     }
 
     async Task Invoke(InstanceHealth h, string command, string payload = null)

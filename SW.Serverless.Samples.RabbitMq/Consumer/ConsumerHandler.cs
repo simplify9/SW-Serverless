@@ -25,6 +25,12 @@ namespace SW.Serverless.Samples.RabbitMq.Consumer
     public class ConsumerHandler : RabbitAdapterBase
     {
         IModel channel;
+
+        // RabbitMQ.Client does not support concurrent application operations on one IModel, and
+        // deliveries are handled on the thread pool — so every application-initiated call on this
+        // channel goes through the gate, acks and nacks included.
+        readonly object channelGate = new();
+
         string consumerTag;
         string queueName;
         ushort prefetch = 16;
@@ -44,7 +50,16 @@ namespace SW.Serverless.Samples.RabbitMq.Consumer
 
             // Prefetch is per channel and is the broker-side half of backpressure. The host-side
             // half is the credit window on PublishAsync; size them together.
-            channel.BasicQos(0, prefetch, global: false);
+            lock (channelGate) channel.BasicQos(0, prefetch, global: false);
+
+            // Manage-only mode: declare the topology and expose the commands, but do not consume.
+            // The provider plan calls this declareMode, and it is how you inspect or purge a queue
+            // without a consumer quietly draining it out from under you.
+            if (Context.StartupValueOf("Consume") == "false")
+            {
+                Context.LogInformation($"Declared '{queueName}' without consuming (Consume=false).");
+                return;
+            }
 
             var consumer = new EventingBasicConsumer(channel);
             consumer.Received += OnReceived;
@@ -79,8 +94,11 @@ namespace SW.Serverless.Samples.RabbitMq.Consumer
 
         protected override void OnStopping()
         {
-            try { if (consumerTag != null) channel?.BasicCancel(consumerTag); } catch { }
-            try { channel?.Close(); channel?.Dispose(); } catch { }
+            lock (channelGate)
+            {
+                try { if (consumerTag != null) channel?.BasicCancel(consumerTag); } catch { }
+                try { channel?.Close(); channel?.Dispose(); } catch { }
+            }
         }
 
         void OnReceived(object sender, BasicDeliverEventArgs delivery)
@@ -108,11 +126,13 @@ namespace SW.Serverless.Samples.RabbitMq.Consumer
 
                 var result = await Context.PublishAsync(
                     delivery.Body,
-                    // The broker's message id is the natural dedupe key. Falling back to a
-                    // delivery tag would be wrong: tags are per channel and reset on reconnect.
+                    // The broker's message id is the natural key. There is no substitute: a body
+                    // hash would make two legitimately identical messages look like a redelivery
+                    // and silently drop the second, and delivery tags are per channel and reset on
+                    // reconnect. With no id we publish unkeyed and let the host see every delivery.
                     dedupeKey: delivery.BasicProperties?.MessageId is { Length: > 0 } id
                         ? $"rabbit:{ExchangeName}:{id}"
-                        : $"rabbit:{ExchangeName}:{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(delivery.Body.Span))[..32]}",
+                        : WarnUnkeyed(),
                     endpoint: queueName,
                     headers: headers,
                     contentType: delivery.BasicProperties?.ContentType ?? "application/octet-stream",
@@ -120,7 +140,7 @@ namespace SW.Serverless.Samples.RabbitMq.Consumer
 
                 if (result.Accepted)
                 {
-                    channel.BasicAck(delivery.DeliveryTag, multiple: false);
+                    lock (channelGate) channel.BasicAck(delivery.DeliveryTag, multiple: false);
                     Interlocked.Increment(ref acked);
                     lastMessageOn = DateTimeOffset.UtcNow;
 
@@ -131,22 +151,32 @@ namespace SW.Serverless.Samples.RabbitMq.Consumer
                 else
                 {
                     // Back onto the queue. The host said no, so this is a redelivery, not a loss.
-                    channel.BasicNack(delivery.DeliveryTag, multiple: false, requeue: true);
+                    lock (channelGate) channel.BasicNack(delivery.DeliveryTag, multiple: false, requeue: true);
                     Interlocked.Increment(ref nacked);
                     LastError = result.Error;
                 }
             }
             catch (OperationCanceledException)
             {
-                try { channel.BasicNack(delivery.DeliveryTag, false, requeue: true); } catch { }
+                try { lock (channelGate) channel.BasicNack(delivery.DeliveryTag, false, requeue: true); } catch { }
             }
             catch (Exception ex)
             {
                 Interlocked.Increment(ref failed);
                 LastError = ex.Message;
                 Context.LogError("Failed to hand a delivery to the host.", ex);
-                try { channel.BasicNack(delivery.DeliveryTag, false, requeue: true); } catch { }
+                try { lock (channelGate) channel.BasicNack(delivery.DeliveryTag, false, requeue: true); } catch { }
             }
+        }
+
+        long unkeyed;
+
+        string WarnUnkeyed()
+        {
+            if (Interlocked.Increment(ref unkeyed) == 1)
+                Context.LogWarning("A message arrived without a MessageId, so it cannot be " +
+                    "deduplicated. Publishers should set one.");
+            return null;
         }
 
         protected override object DeclareMore(IModel model)
@@ -221,14 +251,15 @@ namespace SW.Serverless.Samples.RabbitMq.Consumer
                 throw new ArgumentOutOfRangeException(nameof(value), "Expected 1..65535.");
 
             prefetch = (ushort)value;
-            channel.BasicQos(0, prefetch, global: false);
+            lock (channelGate) channel.BasicQos(0, prefetch, global: false);
             Context.LogInformation($"Prefetch changed to {prefetch} at runtime.");
             return Task.FromResult<object>(new { prefetch });
         }
 
         public Task<object> PurgeQueue()
         {
-            var purged = channel.QueuePurge(queueName);
+            uint purged;
+            lock (channelGate) purged = channel.QueuePurge(queueName);
             Context.LogWarning($"Purged {purged} messages from '{queueName}'.");
             return Task.FromResult<object>(new { purged });
         }
