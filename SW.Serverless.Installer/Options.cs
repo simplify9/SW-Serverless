@@ -15,8 +15,13 @@ namespace SW.Serverless.Installer
     {
         //[Option('v', "verbose", Required = false, HelpText = "Set output to verbose messages.")]
         //public bool Verbose { get; set; }
-        [Option('p', "provider", HelpText = "Provider for storage (as/s3/oc).")]
+        [Option('p', "provider", HelpText = "Storage provider: s3, as (Azure), oc (Oracle), gc (Google), or local (filesystem, for development).")]
         public string Provider { get; set; }
+
+        [Option('k', "kind",
+            HelpText = "Roles this adapter serves, comma separated (e.g. handler,mapper). " +
+                       "Only needed when the adapter does not declare them with [AdapterKind].")]
+        public string Kind { get; set; }
 
         [Option('a', "accesskey", HelpText = "Access key for storage.")]
         public string AccessKeyId { get; set; }
@@ -75,5 +80,19 @@ namespace SW.Serverless.Installer
 
         public string AdapterId { get; set; }
         public string NamespaceName { get; set; }
+
+        // ——— Google Cloud service account ———
+        public string ProjectId { get; set; }
+        public string PrivateKeyId { get; set; }
+        public string PrivateKey { get; set; }
+        public string ClientEmail { get; set; }
+        public string ClientId { get; set; }
+        public string ClientX509CertUrl { get; set; }
+
+        /// <summary>
+        /// Roles this adapter serves, comma separated. Overrides what the assembly declared, for
+        /// an adapter whose author has not added [AdapterKind] to it.
+        /// </summary>
+        public string Kind { get; set; }
     }
 }
