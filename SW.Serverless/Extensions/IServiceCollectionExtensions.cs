@@ -1,6 +1,8 @@
 ﻿
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using SW.PrimitiveTypes;
+using SW.Serverless.Resident;
 using System;
 using System.Reflection;
 
@@ -15,6 +17,32 @@ namespace SW.Serverless
             services.AddSingleton(serverlessOptions);
             services.AddTransient<IServerlessService, ServerlessService>();
             services.AddMemoryCache();
+            services.TryAddSingleton<AdapterInstaller>();
+
+            return services;
+        }
+
+        /// <summary>
+        /// Adds the resident adapter runtime: a Kestrel endpoint on a Unix domain socket or named
+        /// pipe that adapters dial, plus the supervisor that owns their processes.
+        /// Classic per-invocation adapters are untouched by this — see the design doc, section 15.
+        /// </summary>
+        public static IServiceCollection AddResidentAdapters<TSink>(this IServiceCollection services,
+            Action<ResidentOptions> configure = null)
+            where TSink : class, IAdapterEventSink
+        {
+            var options = new ResidentOptions();
+            configure?.Invoke(options);
+
+            services.AddMemoryCache();
+
+            services.AddSingleton(options);
+            services.TryAddSingleton<IAdapterEventSink, TSink>();
+            services.TryAddSingleton<AdapterInstaller>();
+            services.TryAddSingleton<IResidentAdapterLocator, DefaultResidentAdapterLocator>();
+            services.AddSingleton<ResidentAdapterHost>();
+            services.AddSingleton<IResidentAdapterHost>(sp => sp.GetRequiredService<ResidentAdapterHost>());
+            services.AddHostedService(sp => sp.GetRequiredService<ResidentAdapterHost>());
 
             return services;
         }

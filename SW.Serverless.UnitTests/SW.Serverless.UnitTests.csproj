@@ -14,14 +14,21 @@
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="SimplyWorks.CloudFiles.AS" Version="8.0.1" />
-        <PackageReference Include="SimplyWorks.CloudFiles.AS.Extensions" Version="8.0.1" />
+        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests" Version="8.1.6" />
+        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="8.1.6" />
 
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\SW.Serverless.Installer\SW.Serverless.Installer.csproj" />
         <ProjectReference Include="..\SW.Serverless\SW.Serverless.csproj" />
+        <!-- Build order only: these are packaged and launched as separate processes. -->
+        <ProjectReference Include="..\SW.Serverless.UnitTests.Adapter\SW.Serverless.UnitTests.Adapter.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.Ticker\SW.Serverless.Samples.Ticker.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.FolderSource\SW.Serverless.Samples.FolderSource.csproj"
+                          ReferenceOutputAssembly="false" />
     </ItemGroup>
 
     <ItemGroup>
