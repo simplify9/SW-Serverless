@@ -164,7 +164,12 @@ namespace SW.Serverless.Samples.LargeFiles
         {
             var name = Path.GetFileName(path);
 
-            try { using var _ = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read); }
+            // An exclusive open is the only handoff that actually proves the producer is finished:
+            // a writer holding the file with FileShare.Read would sail through a read-only probe and
+            // we would stream — and then archive — a partial file. Producers that cannot cooperate
+            // should write under a non-matching temporary name and rename it when complete; the
+            // rename is atomic, so the scan never sees a half-written file under the watched name.
+            try { using var _ = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None); }
             catch (IOException) { return; }     // still being written; next poll
 
             currentFile = name;
@@ -174,6 +179,7 @@ namespace SW.Serverless.Samples.LargeFiles
             meter.Start();
 
             var accepted = true;
+            var completed = false;      // only a clean run through every chunk sets this
 
             try
             {
@@ -233,6 +239,8 @@ namespace SW.Serverless.Samples.LargeFiles
                     if (options.ThrottleMsPerChunk > 0)
                         await Task.Delay(options.ThrottleMsPerChunk, ct);
                 }
+
+                completed = accepted;
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -244,7 +252,9 @@ namespace SW.Serverless.Samples.LargeFiles
             }
             finally
             {
-                if (accepted)
+                // Cancellation mid-stream leaves `accepted` true but the file half-sent. Archiving
+                // on that would silently drop the remainder, so archive only on a completed run.
+                if (completed)
                 {
                     filesCompleted++;
                     logger.LogInformation(

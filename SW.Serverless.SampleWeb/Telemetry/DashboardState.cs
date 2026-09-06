@@ -51,10 +51,16 @@ namespace SW.Serverless.SampleWeb.Telemetry
         {
             get
             {
+                var now = DateTimeOffset.UtcNow;
                 lock (rateGate)
                 {
+                    // Tick is not the only reader: without expiring here, a feed that stops still
+                    // reports a rate from stale timestamps long after the histogram has emptied.
+                    while (recent.Count > 0 && now - recent.Peek() > TimeSpan.FromSeconds(10))
+                        recent.Dequeue();
+
                     if (recent.Count < 2) return 0;
-                    var span = (DateTimeOffset.UtcNow - recent.Peek()).TotalSeconds;
+                    var span = (now - recent.Peek()).TotalSeconds;
                     return span <= 0 ? 0 : Math.Round(recent.Count / span, 1);
                 }
             }

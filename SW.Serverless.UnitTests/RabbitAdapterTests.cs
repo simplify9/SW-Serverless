@@ -287,10 +287,12 @@ namespace SW.Serverless.UnitTests
             var queue = "q.purge";
 
             // Consumer first so the queue and binding exist, then stop it so nothing drains.
+            // AutoDelete has to be off: the default deletes the queue the moment this consumer
+            // goes away, and the purge below would then be purging a brand new empty queue.
             await adapters.StartExclusiveAsync(new AdapterSpec
             {
                 AdapterId = ConsumerId, InstanceKey = "purge-in",
-                StartupValues = Common(exchange, queue)
+                StartupValues = Common(exchange, queue, autoDelete: false)
             });
             await adapters.StopAsync(ConsumerId, "purge-in", drain: false);
 
@@ -302,15 +304,25 @@ namespace SW.Serverless.UnitTests
             for (var i = 0; i < 5; i++)
                 await publisher.InvokeAsync<object>("PublishOne", $"{{\"n\":{i}}}");
 
-            // Re-attach only to purge and read depth.
+            // Re-attach only to purge and read depth. Consume=false matters: an actively consuming
+            // instance would ack the five messages away before the purge could see them.
+            var checkValues = Common(exchange, queue, autoDelete: false);
+            checkValues["Consume"] = "false";
+
             var consumer = await adapters.StartExclusiveAsync(new AdapterSpec
             {
                 AdapterId = ConsumerId, InstanceKey = "purge-check",
-                StartupValues = Common(exchange, queue)
+                StartupValues = checkValues
             });
+
+            // Wait for the publishes to land before purging, or the count proves nothing.
+            await WaitFor(async () => (await Stats(consumer)).Value<int?>("depth") >= 5,
+                TimeSpan.FromSeconds(15), "the published messages never reached the queue");
+
             var purged = await consumer.InvokeAsync<JObject>("PurgeQueue");
 
-            Assert.IsTrue(purged.Value<int>("purged") >= 0);
+            Assert.IsTrue(purged.Value<int>("purged") >= 5,
+                $"expected at least the 5 published messages to be purged, got {purged.Value<int>("purged")}");
             await WaitFor(async () => (await Stats(consumer)).Value<int?>("depth") == 0,
                 TimeSpan.FromSeconds(15), "the queue did not end up empty");
         }
@@ -377,7 +389,8 @@ namespace SW.Serverless.UnitTests
 
         // ------------------------------------------------------------------ helpers
 
-        static Dictionary<string, string> Common(string exchange, string queue = null, int intervalMs = 0)
+        static Dictionary<string, string> Common(string exchange, string queue = null, int intervalMs = 0,
+            bool? autoDelete = null)
         {
             var values = new Dictionary<string, string>
             {
@@ -390,6 +403,7 @@ namespace SW.Serverless.UnitTests
                 ["RoutingKey"] = RoutingKey
             };
             if (queue != null) values["Queue"] = queue;
+            if (autoDelete == false) values["AutoDelete"] = "false";
             if (intervalMs > 0) values["IntervalMs"] = intervalMs.ToString();
             return values;
         }

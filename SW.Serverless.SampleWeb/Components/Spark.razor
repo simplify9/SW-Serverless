@@ -1,3 +1,4 @@
+@using System.Globalization
 @* Ten one-second buckets of event throughput. Inline SVG — no charting library needed. *@
 
 <svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none" role="img"
@@ -5,8 +6,9 @@
     @for (var i = 0; i < bars.Length; i++)
     {
         var height = max == 0 ? 0.5 : Math.Max(0.5, bars[i] / (double)max * 22);
-        <rect x="@(i * 10 + 1)" y="@(23 - height).ToString("0.##")"
-              width="8" height="@height.ToString("0.##")" rx="1" fill="currentColor" />
+        @* SVG attributes are not culture-aware: a comma decimal separator makes the rect vanish. *@
+        <rect x="@(i * 10 + 1)" y="@Svg(23 - height)"
+              width="8" height="@Svg(height)" rx="1" fill="currentColor" />
     }
 </svg>
 
@@ -15,4 +17,6 @@
 
     int[] bars => Values is { Length: > 0 } ? Values : new int[10];
     int max => bars.Length == 0 ? 0 : bars.Max();
+
+    static string Svg(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
 }

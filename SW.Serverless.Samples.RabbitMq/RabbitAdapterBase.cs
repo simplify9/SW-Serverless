@@ -62,18 +62,40 @@ namespace SW.Serverless.Samples.RabbitMq
 
         protected virtual void OnStarted() { }
 
-        protected static ConnectionFactory CreateConnectionFactory(IAdapterContext context) => new()
+        protected static ConnectionFactory CreateConnectionFactory(IAdapterContext context)
         {
-            HostName = context.StartupValueOf("Host") ?? "localhost",
-            Port = int.TryParse(context.StartupValueOf("Port"), out var port) ? port : 5672,
-            UserName = context.StartupValueOf("UserName") ?? "guest",
-            Password = context.StartupValueOf("Password") ?? "guest",
-            VirtualHost = context.StartupValueOf("VirtualHost") ?? "/",
+            // AMQP authenticates with PLAIN, so without TLS the broker password crosses the network
+            // in the clear. Off by default only because the test broker is a local container;
+            // set Tls=true (and Port=5671) for anything that is not localhost.
+            var tls = context.StartupValueOf("Tls") == "true";
+            var host = context.StartupValueOf("Host") ?? "localhost";
 
-            // The supervisor owns restart policy, so do not also run a hidden one in here.
-            AutomaticRecoveryEnabled = false,
-            RequestedConnectionTimeout = TimeSpan.FromSeconds(10)
-        };
+            var factory = new ConnectionFactory
+            {
+                HostName = host,
+                Port = int.TryParse(context.StartupValueOf("Port"), out var port) ? port : (tls ? 5671 : 5672),
+                UserName = context.StartupValueOf("UserName") ?? "guest",
+                Password = context.StartupValueOf("Password") ?? "guest",
+                VirtualHost = context.StartupValueOf("VirtualHost") ?? "/",
+
+                // The supervisor owns restart policy, so do not also run a hidden one in here.
+                AutomaticRecoveryEnabled = false,
+                RequestedConnectionTimeout = TimeSpan.FromSeconds(10)
+            };
+
+            if (tls)
+            {
+                factory.Ssl.Enabled = true;
+                factory.Ssl.ServerName = context.StartupValueOf("TlsServerName") ?? host;
+            }
+            else if (host != "localhost" && host != "127.0.0.1")
+            {
+                context.LogWarning($"Connecting to '{host}' without TLS — the broker password will " +
+                                   "cross the network in the clear. Set Tls=true.");
+            }
+
+            return factory;
+        }
 
         protected void DeclareExchange(IModel channel) =>
             channel.ExchangeDeclare(ExchangeName, ExchangeType, durable: false, autoDelete: false);

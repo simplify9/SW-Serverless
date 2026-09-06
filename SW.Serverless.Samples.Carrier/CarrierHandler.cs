@@ -40,6 +40,9 @@ namespace SW.Serverless.Samples.Carrier
         string lastError;
         volatile string state = "Starting";
 
+        // Stop is terminal: once it has run, no in-flight call may report the adapter healthy again.
+        volatile bool stopped;
+
         public CarrierHandler(CarrierContract.Carrier.CarrierClient carrier,
             IOptions<CarrierOptions> options, CallLog callLog, ILogger<CarrierHandler> logger)
         {
@@ -77,6 +80,7 @@ namespace SW.Serverless.Samples.Carrier
 
         public Task StopAsync(CancellationToken cancellationToken)
         {
+            stopped = true;
             state = "Stopped";
             logger.LogInformation("Carrier adapter stopping after {Created} shipments.", created);
             return Task.CompletedTask;
@@ -144,10 +148,14 @@ namespace SW.Serverless.Samples.Carrier
                 HeightCm = p.Height
             }));
 
+            // Retrying a create is only safe because the carrier deduplicates on our reference and
+            // replays the original shipment. With no reference there is nothing to deduplicate on,
+            // so a retry after a timeout could book the same parcel twice — do not retry then.
             var reply = await CallAsync(nameof(CreateShipment),
                 token => carrier.CreateShipmentAsync(upstream,
                     deadline: DateTime.UtcNow.AddSeconds(options.TimeoutSeconds),
-                    cancellationToken: token));
+                    cancellationToken: token),
+                idempotent: !string.IsNullOrWhiteSpace(upstream.Reference));
 
             if (reply == null)
                 return new ShipmentResult
@@ -259,7 +267,8 @@ namespace SW.Serverless.Samples.Carrier
         /// remember them — which is exactly what a base class does for the Traxis adapters.
         /// </summary>
         async Task<TReply> CallAsync<TReply>(string operation,
-            Func<CancellationToken, AsyncUnaryCall<TReply>> call) where TReply : class
+            Func<CancellationToken, AsyncUnaryCall<TReply>> call, bool idempotent = true)
+            where TReply : class
         {
             var clock = Stopwatch.StartNew();
 
@@ -271,6 +280,12 @@ namespace SW.Serverless.Samples.Carrier
 
                     clock.Stop();
                     lastCallOn = DateTimeOffset.UtcNow;
+
+                    // A failed attempt may have parked the adapter in "Disconnected"; a success
+                    // clears that. Shutdown wins, so a call landing after StopAsync cannot
+                    // resurrect the adapter's reported state.
+                    if (!stopped) state = "Connected";
+
                     callLog.Record(operation, clock.Elapsed, true,
                         attempt > 1 ? $"succeeded on attempt {attempt}" : null);
 
@@ -279,13 +294,15 @@ namespace SW.Serverless.Samples.Carrier
 
                     return reply;
                 }
-                catch (RpcException ex) when (Transient(ex) && attempt < options.MaxAttempts)
+                catch (RpcException ex) when (idempotent && Transient(ex) && attempt < options.MaxAttempts)
                 {
                     retries++;
                     logger.LogWarning("{Operation} failed with {Status}; retrying ({Attempt}/{Max}).",
                         operation, ex.StatusCode, attempt, options.MaxAttempts);
 
-                    await Task.Delay(options.RetryDelayMs * attempt);
+                    // Without the stop token the loop sits out the whole delay during shutdown and
+                    // then makes one more attempt with an already-cancelled token.
+                    await Task.Delay(options.RetryDelayMs * attempt, context?.Stopping ?? CancellationToken.None);
                 }
                 catch (Exception ex)
                 {

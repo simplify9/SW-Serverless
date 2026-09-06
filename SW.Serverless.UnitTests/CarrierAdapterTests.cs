@@ -1,6 +1,8 @@
 using Grpc.Core;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -33,22 +35,27 @@ namespace SW.Serverless.UnitTests
         static WebApplication carrier;
         static IHost host;
         static IResidentAdapterHost adapters;
-        static int port;
+        static string baseUrl;
 
         [ClassInitialize]
         public static async Task ClassInitialize(TestContext context)
         {
-            port = Random.Shared.Next(21000, 21900);
-
+            // Port 0 lets the OS hand out a free port and hold it for Kestrel. Picking a random
+            // number instead reserves nothing, so a parallel test or any local process can take it
+            // between the choice and the bind — an intermittent AddressAlreadyInUse.
             var builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(k =>
-                k.ListenLocalhost(port, o => o.Protocols = HttpProtocols.Http2));
+                k.Listen(System.Net.IPAddress.Loopback, 0, o => o.Protocols = HttpProtocols.Http2));
             builder.Services.AddGrpc();
 
             carrier = builder.Build();
             carrier.MapGrpcService<FakeCarrier>();
             await carrier.StartAsync();
+
+            baseUrl = carrier.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First()
+                .Replace("127.0.0.1", "localhost");
 
             host = Host.CreateDefaultBuilder()
                 .ConfigureLogging(l => l.ClearProviders())
@@ -106,7 +113,7 @@ namespace SW.Serverless.UnitTests
             InstanceKey = key,
             StartupValues =
             {
-                ["BaseUrl"] = $"http://localhost:{port}",
+                ["BaseUrl"] = baseUrl,
                 ["Account"] = "TEST-ACCT",
                 ["ApiKey"] = "not-a-real-secret",
                 ["MaxAttempts"] = "3",
@@ -131,7 +138,7 @@ namespace SW.Serverless.UnitTests
             var result = await instance.InvokeAsync<JObject>("TestConnection");
 
             Assert.IsTrue(result.Value<bool>("ok"));
-            Assert.AreEqual($"http://localhost:{port}", result.Value<string>("endpoint"));
+            Assert.AreEqual(baseUrl, result.Value<string>("endpoint"));
             Assert.AreEqual("fake-carrier/1.0", result.Value<string>("version"));
         }
 

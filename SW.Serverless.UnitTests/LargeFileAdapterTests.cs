@@ -187,11 +187,18 @@ namespace SW.Serverless.UnitTests
         [TestMethod]
         public async Task Streaming_can_be_paused_and_resumed()
         {
-            var instance = await Start("pause");
+            // A heavier throttle so the transfer is still in flight when Pause lands. At 2 ms a
+            // chunk the whole file can finish before the poll below returns, and then the test is
+            // pausing nothing and waiting for acknowledgements that can never arrive.
+            var instance = await Start("pause", throttleMsPerChunk: 60);
 
             await instance.InvokeAsync<JObject>("GenerateTestFile", 8, timeoutSeconds: 60);
             await WaitFor(async () =>
-                (await instance.InvokeAsync<JObject>("GetProgress")).Value<int>("chunksAcked") > 2,
+                {
+                    var progress = await instance.InvokeAsync<JObject>("GetProgress");
+                    return progress.Value<int>("chunksAcked") > 2
+                           && progress.Value<string>("state") == "Streaming";
+                },
                 TimeSpan.FromSeconds(60), "streaming never started");
 
             var paused = await instance.InvokeAsync<JObject>("Pause");
@@ -213,7 +220,10 @@ namespace SW.Serverless.UnitTests
         [TestMethod]
         public async Task Progress_reaches_the_health_view_through_the_heartbeat()
         {
-            var instance = await Start("progress");
+            // Throttled so the transfer is still running when the heartbeat samples it. At full
+            // speed the file can complete between two heartbeats and progress never appears —
+            // the test would then be asserting on timing, not on the heartbeat.
+            var instance = await Start("progress", throttleMsPerChunk: 40);
             await instance.InvokeAsync<JObject>("GenerateTestFile", 16, timeoutSeconds: 90);
 
             await WaitFor(() => adapters.Describe()
@@ -232,7 +242,7 @@ namespace SW.Serverless.UnitTests
 
         static string RootFor(string key) => Path.Combine(root, key);
 
-        static Task<ResidentAdapterInstance> Start(string key)
+        static Task<ResidentAdapterInstance> Start(string key, int throttleMsPerChunk = 2)
         {
             Directory.CreateDirectory(RootFor(key));
             return adapters.StartExclusiveAsync(new AdapterSpec
@@ -245,7 +255,7 @@ namespace SW.Serverless.UnitTests
                     ["Pattern"] = "*.bin",
                     ["ChunkSizeKb"] = ChunkKb.ToString(),
                     ["PollSeconds"] = "1",
-                    ["ThrottleMsPerChunk"] = "2"
+                    ["ThrottleMsPerChunk"] = throttleMsPerChunk.ToString()
                 }
             });
         }

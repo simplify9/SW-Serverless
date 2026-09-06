@@ -3,7 +3,7 @@
   --ink:#16202b; --ink2:#4d6072; --dim:#7d91a3; --rule:#dbe3ea;
   --accent:#0d6a72; --ok:#1f7a52; --ok-bg:#dcefe4; --warn:#8a5a12; --warn-bg:#faf0da;
   --bad:#9c3328; --bad-bg:#f8e2df; --muted-bg:#e7edf1;
-  --mono:"SFMono-Regular",Menlo,Consolas,monospace;
+  --mono:"SFMono-Regular","Menlo","Consolas",monospace;
 }
 @media (prefers-color-scheme:dark){
   :root{
@@ -97,7 +97,7 @@ input.wide{flex:1;min-width:230px}
 
 pre.result,pre.diag{font:12px/1.5 var(--mono);background:var(--surface2);border:1px solid var(--rule);
   border-radius:5px;padding:11px 13px;margin:13px 0 0;overflow-x:auto;white-space:pre-wrap;
-  word-break:break-word;max-height:280px}
+  overflow-wrap:anywhere;max-height:280px}
 pre.result.bad{border-color:var(--bad);color:var(--bad)}
 pre.diag{color:var(--ink2);max-height:220px}
 details{margin-top:14px}
