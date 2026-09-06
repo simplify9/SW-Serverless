@@ -3,6 +3,7 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using Newtonsoft.Json;
 using SW.Serverless.Contract;
+
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -14,6 +15,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Channels;
+using AdapterSession = SW.Serverless.Sdk.Hosting.AdapterSession;
 using System.Threading.Tasks;
 
 namespace SW.Serverless.Sdk.Resident
@@ -27,10 +29,13 @@ namespace SW.Serverless.Sdk.Resident
     {
         const int ProtocolVersion = 2;
 
-        readonly object handler;
-        readonly IResidentAdapter resident;
-        readonly IResettable resettable;
+        readonly Type handlerType;
+        readonly Func<IAdapterContext, object> handlerFactory;
         readonly Dictionary<string, HandlerMethodInfo> commands;
+
+        object handler;
+        IResidentAdapter resident;
+        IResettable resettable;
 
         readonly Channel<AdapterFrame> outbound =
             Channel.CreateBounded<AdapterFrame>(new BoundedChannelOptions(2048)
@@ -50,19 +55,28 @@ namespace SW.Serverless.Sdk.Resident
         IReadOnlyDictionary<string, string> startupValues = new Dictionary<string, string>();
         IReadOnlyDictionary<string, string> adapterValues = new Dictionary<string, string>();
 
-        ResidentRunner(object handler)
+        ResidentRunner(Type handlerType, Func<IAdapterContext, object> handlerFactory)
         {
-            this.handler = handler;
-            resident = handler as IResidentAdapter;
-            resettable = handler as IResettable;
-            commands = BuildCommands(handler);
+            this.handlerType = handlerType;
+            this.handlerFactory = handlerFactory;
+
+            // Discovered from the TYPE, so Hello can advertise the commands before startup values
+            // have arrived and before the handler itself exists.
+            commands = BuildCommands(handlerType);
         }
 
         // ------------------------------------------------------------------ entry point
 
-        public static async Task RunAsync(object handler)
+        public static Task RunAsync(object handler) =>
+            RunAsync(handler.GetType(), _ => handler);
+
+        /// <summary>
+        /// The handler is built only once startup values are in hand, which is what lets a
+        /// DI container inject configuration into its constructor.
+        /// </summary>
+        public static async Task RunAsync(Type handlerType, Func<IAdapterContext, object> handlerFactory)
         {
-            var runner = new ResidentRunner(handler);
+            var runner = new ResidentRunner(handlerType, handlerFactory);
             try
             {
                 await runner.RunCoreAsync();
@@ -95,7 +109,7 @@ namespace SW.Serverless.Sdk.Resident
                 MaxSendMessageSize = 64 * 1024 * 1024
             });
 
-            var client = new AdapterHost.AdapterHostClient(channel);
+            var client = new Contract.AdapterHost.AdapterHostClient(channel);
             using var call = client.Attach(cancellationToken: stopping.Token);
 
             // Single writer task. gRPC request streams are not safe for concurrent writes,
@@ -127,8 +141,8 @@ namespace SW.Serverless.Sdk.Resident
 
         IEnumerable<string> Capabilities()
         {
-            if (resident != null) yield return "resident";
-            if (resettable != null) yield return "resettable";
+            if (typeof(IResidentAdapter).IsAssignableFrom(handlerType)) yield return "resident";
+            if (typeof(IResettable).IsAssignableFrom(handlerType)) yield return "resettable";
             foreach (var c in commands.Keys) yield return "command:" + c;
         }
 
@@ -187,6 +201,11 @@ namespace SW.Serverless.Sdk.Resident
             adapterValues = new Dictionary<string, string>(ready.AdapterValues, StringComparer.OrdinalIgnoreCase);
             inFlight = new SemaphoreSlim(Math.Max(1, ready.MaxInFlight));
 
+            // Now, and only now, is it safe to construct the handler.
+            handler = handlerFactory(this);
+            resident = handler as IResidentAdapter;
+            resettable = handler as IResettable;
+
             if (resident != null)
                 await resident.StartAsync(this, stopping.Token);
         }
@@ -195,8 +214,13 @@ namespace SW.Serverless.Sdk.Resident
         {
             try
             {
+                if (handler == null)
+                    throw new InvalidOperationException("The adapter has not been made ready yet.");
+
                 if (!commands.TryGetValue(invoke.Command, out var method))
-                    throw new MissingMethodException(handler.GetType().FullName, invoke.Command);
+                    throw new MissingMethodException(handlerType.FullName, invoke.Command);
+
+                using var session = AdapterSession.Begin(id.ToString(), invoke.Command);
 
                 object arg = null;
                 if (method.ParameterType != null && !invoke.Payload.IsEmpty)
@@ -407,13 +431,13 @@ namespace SW.Serverless.Sdk.Resident
 
         // ------------------------------------------------------------------ command discovery
 
-        static Dictionary<string, HandlerMethodInfo> BuildCommands(object handler)
+        static Dictionary<string, HandlerMethodInfo> BuildCommands(Type handlerType)
         {
             var map = new Dictionary<string, HandlerMethodInfo>(StringComparer.OrdinalIgnoreCase);
             var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 { "StartAsync", "StopAsync", "GetStatusAsync", "ResetAsync" };
 
-            foreach (var m in handler.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public))
+            foreach (var m in handlerType.GetMethods(BindingFlags.Instance | BindingFlags.Public))
             {
                 if (m.IsGenericMethod || m.GetParameters().Length > 1) continue;
                 if (m.DeclaringType == typeof(object) || skip.Contains(m.Name)) continue;

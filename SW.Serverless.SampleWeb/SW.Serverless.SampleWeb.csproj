@@ -31,6 +31,8 @@
                           ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\SW.Serverless.Samples.RabbitConsumer\SW.Serverless.Samples.RabbitConsumer.csproj"
                           ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.LargeFiles\SW.Serverless.Samples.LargeFiles.csproj"
+                          ReferenceOutputAssembly="false" />
     </ItemGroup>
 
 </Project>

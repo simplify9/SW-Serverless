@@ -24,6 +24,10 @@ namespace SW.Serverless.SampleWeb.Services
         public const string ClassicId = "sample.classic";
         public const string RabbitPublisherId = "rabbit.publisher";
         public const string RabbitConsumerId = "rabbit.consumer";
+        public const string LargeFilesId = "sample.largefiles";
+
+        public static readonly string DropPath =
+            Path.Combine(Path.GetTempPath(), "swsl-sampleweb", "drop");
 
         const string Exchange = "swsl.sample";
         const string RoutingKey = "sample.tick";
@@ -51,6 +55,7 @@ namespace SW.Serverless.SampleWeb.Services
         public async Task StartAsync(CancellationToken cancellationToken)
         {
             Directory.CreateDirectory(InboxPath);
+            Directory.CreateDirectory(DropPath);
 
             try
             {
@@ -74,6 +79,14 @@ namespace SW.Serverless.SampleWeb.Services
                     new Dictionary<string, string>
                     {
                         ["Protocol"] = "2", ["Lifecycle"] = "resident", ["MaxInFlight"] = "8"
+                    });
+
+                await packager.PublishAsync(LargeFilesId, "SW.Serverless.Samples.LargeFiles",
+                    new Dictionary<string, string>
+                    {
+                        // A small credit window on purpose: chunks are large, so the host holding
+                        // only four unacked at a time is what keeps memory flat under load.
+                        ["Protocol"] = "2", ["Lifecycle"] = "resident", ["MaxInFlight"] = "4"
                     });
 
                 await packager.PublishAsync(RabbitConsumerId, "SW.Serverless.Samples.RabbitConsumer",
@@ -108,6 +121,21 @@ namespace SW.Serverless.SampleWeb.Services
                         ["Path"] = InboxPath,
                         ["Pattern"] = "*.json",
                         ["PollSeconds"] = "2"
+                    }
+                }, cancellationToken);
+
+                await adapters.StartExclusiveAsync(new AdapterSpec
+                {
+                    AdapterId = LargeFilesId,
+                    InstanceKey = "ds-largefiles",
+                    StartupValues =
+                    {
+                        ["Path"] = DropPath,
+                        ["Pattern"] = "*.bin",
+                        ["ChunkSizeKb"] = "256",
+                        ["PollSeconds"] = "2",
+                        // Slow enough that progress is watchable rather than instantaneous.
+                        ["ThrottleMsPerChunk"] = "8"
                     }
                 }, cancellationToken);
 

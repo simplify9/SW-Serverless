@@ -19,6 +19,40 @@ services.AddResidentAdapters<MyEventSink>(o => o.HeartbeatInterval = TimeSpan.Fr
 Classic adapters are **untouched**. An adapter whose cloud metadata has no `Protocol` key takes
 the v1 code path byte for byte — which is what keeps the existing fleet alive.
 
+## Dependency injection in an adapter
+
+`Runner.Run(new Handler())` still works and is unchanged. When an adapter grows past a single
+class, `AdapterHost` gives it the same shape as any .NET service:
+
+```csharp
+static Task Main() => AdapterHost.CreateBuilder()
+    .ConfigureServices((configuration, services) =>
+    {
+        services.Configure<StreamOptions>(configuration);   // bound from startup values
+        services.AddSingleton<IChunkReader, ChunkReader>();
+        services.AddHttpClient();
+    })
+    .Build<MyHandler>()
+    .RunResidentAsync();                                    // or .RunAsync() for the classic path
+```
+
+You get, without asking for it:
+
+* **`ILogger<T>`** routed onto the adapter's log channel, so anything your services — or the
+  libraries they use — log reaches the host under `serverless.adapters.{id}`.
+* **`IConfiguration`** built from startup values, with cloud metadata namespaced under
+  `AdapterValues:` so it can never shadow them.
+* **`IAdapterContext`** for pushing events and metrics, injectable anywhere.
+* **`AdapterSession.Id`** — ambient per-invocation identity, and the boundary a pooled adapter
+  needs so state cannot leak between checkouts.
+
+**This also removes the constructor footgun.** The container is built *after* startup values
+arrive, so injecting `IOptions<T>` into a constructor is safe — unlike
+`Runner.Run(new Handler())`, where the handler exists before argv has been parsed.
+
+Only `SWSL_`-prefixed environment variables are bound, and startup values outrank them. Binding
+the environment unprefixed is a trap: a setting named `Path` picks up the machine's `PATH`.
+
 ## Run the samples
 
 Two hosts, for two kinds of look. Build the solution first — both package adapters from their
@@ -55,6 +89,7 @@ the download, extract and launch steps are exercised, not skipped. That is the
 | `SW.Serverless.Samples.RabbitMq` | Shared connection handling for the two broker samples. Everything is a startup value — host, vhost, exchange type, queue arguments — because a provider must not be opinionated about the broker's own model. Reconnection is deliberately **not** retried in a loop: the adapter reports itself disconnected and lets the supervisor decide, where backoff and crash-loop quarantine already live. |
 | `SW.Serverless.Samples.RabbitPublisher` | **Egress.** Publishes every 10 ms (~100/s) with publisher confirms and `mandatory: true`, so unroutable messages come back through `BasicReturn` instead of vanishing. `SetInterval` changes the rate while running. |
 | `SW.Serverless.Samples.RabbitConsumer` | **Ingress.** Declares a queue and binding, consumes with `autoAck: false`, and **only calls `BasicAck` after the host has acknowledged**. A host rejection becomes `BasicNack(requeue: true)`. This is the ordering to copy for a Kafka offset commit. `SetPrefetch` changes the broker-side backpressure dial at runtime. |
+| `SW.Serverless.Samples.LargeFiles` | **Streaming, and what visibility looks like under load.** Streams a file in configurable chunks and pushes each to the host, so resident memory tracks the *chunk* size and not the file size. Reports percent, MB/s, ETA and its own working set on the heartbeat, which the dashboard renders as a live progress bar. `GenerateTestFile` makes a file of any size on demand; `Pause` / `Resume` hold a transfer mid-file. Built entirely on constructor injection — options, a reader service, a throughput meter and an `ILogger`. |
 | `SW.Serverless.Samples.Classic` | A conventional **non-resident** adapter — `Runner.Run`, no `Protocol` metadata key, so the host takes the v1 path for it byte for byte. Shows startup values and the `{{expected}}` schema, typed commands, `AdapterLogger`, failures and timeouts, and process-static state. |
 | `SW.Serverless.Samples.Host` | Console host. Implements `IAdapterEventSink`, starts both adapters, prints events and heartbeats. |
 | `SW.Serverless.SampleWeb` | Blazor Server dashboard plus minimal APIs. Live adapter health, event feed, adapter logs and metrics, failure injection, and a page for the classic per-invocation lifecycle to contrast against. |
@@ -116,6 +151,12 @@ staged test-connection, topology discovery, advertised commands, and heartbeat d
 that matters most is `A_rejected_message_is_nacked_back_and_redelivered` — a host rejection
 becomes `BasicNack(requeue: true)`, the message returns to the queue, and the redelivery carries
 the same dedupe key so the host recognises it instead of persisting it twice.
+
+`LargeFileAdapterTests` proves the streaming claim rather than asserting it: a 24 MB file through
+a 64 KB chunker must not grow the adapter's working set by 24 MB. Measured in the sample web,
+512 MB streamed in 2048 chunks while resident memory held flat at 62–64 MB.
+`AdapterHostingTests` covers the DI container, including a regression for the environment-variable
+trap above.
 
 `ResidentAdapterTests` covers installation from storage, typed command results and
 typed failures, push/ack, and three things worth calling out:

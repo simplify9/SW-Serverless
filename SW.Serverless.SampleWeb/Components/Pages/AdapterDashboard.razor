@@ -95,6 +95,29 @@
             <div class="banner bad">Last error: @h.LastError</div>
         }
 
+        @if (h.Details.TryGetValue("percent", out var percent) && h.Details.ContainsKey("currentFile"))
+        {
+            <div class="progress-wrap">
+                <div class="progress-head">
+                    <span class="mono">@h.Details["currentFile"]</span>
+                    <span class="num">
+                        @Mb(h.Details, "bytesRead") / @Mb(h.Details, "totalBytes") MB
+                        · @Detail(h, "throughputMbPerSec", "0") MB/s
+                        @if (h.Details.TryGetValue("etaSeconds", out var eta))
+                        {
+                            <text> · @eta s left</text>
+                        }
+                    </span>
+                </div>
+                <div class="progress"><div class="progress-fill" style="width:@(percent)%"></div></div>
+                <div class="progress-foot dim">
+                    adapter's own working set <b>@Detail(h, "selfWorkingSetMb", "?") MB</b>
+                    — flat regardless of file size, because it streams in
+                    @Detail(h, "chunkSizeKb", "?") KB chunks rather than buffering
+                </div>
+            </div>
+        }
+
         @if (h.Details.Count > 0)
         {
             <div class="detail-row">
@@ -127,6 +150,11 @@
             @if (h.AdapterId == DemoBootstrapper.FolderSourceId)
             {
                 <button @onclick="DropFile">Drop a file into the inbox</button>
+            }
+            @if (h.AdapterId == DemoBootstrapper.LargeFilesId)
+            {
+                <button @onclick='() => Invoke(h, "GenerateTestFile", "64")'>Generate 64 MB</button>
+                <button @onclick='() => Invoke(h, "GenerateTestFile", "512")'>Generate 512 MB</button>
             }
         </div>
 
@@ -213,6 +241,8 @@
         {
             "SetInterval" => h.AdapterId == DemoBootstrapper.RabbitPublisherId ? "50" : "2",
             "SetPrefetch" => "8",
+            "GenerateTestFile" => "64",
+            "SetChunkSize" => "512",
             "Sleep" => "3",
             "Echo" => "hello from the dashboard",
             "PublishOne" => "{\"hello\":\"from the dashboard\"}",
@@ -295,6 +325,14 @@
         var path = Path.Combine(DemoBootstrapper.InboxPath, $"web-{DateTime.UtcNow:HHmmssfff}.json");
         await File.WriteAllTextAsync(path, $"{{\"droppedAt\":\"{DateTimeOffset.UtcNow:O}\"}}");
     }
+
+    static string Detail(InstanceHealth h, string key, string fallback) =>
+        h.Details.TryGetValue(key, out var value) ? value : fallback;
+
+    static string Mb(IDictionary<string, string> details, string key) =>
+        details.TryGetValue(key, out var raw) && long.TryParse(raw, out var bytes)
+            ? (bytes / 1024d / 1024d).ToString("0.0")
+            : "?";
 
     static string Format(TimeSpan t) =>
         t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes}m" :

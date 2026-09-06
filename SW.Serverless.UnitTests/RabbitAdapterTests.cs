@@ -170,12 +170,15 @@ namespace SW.Serverless.UnitTests
         {
             var publisher = await StartPublisher("pub-unroutable");
 
-            Assert.AreEqual(0, (await Stats(publisher)).Value<long>("returned"));
+            // Measure a DELTA, not an absolute. Nothing is bound to this test's exchange, so the
+            // publisher's own first tick is unroutable too and races with the one below —
+            // asserting "returned == 1" made this test flaky under load.
+            var before = (await Stats(publisher)).Value<long>("returned");
 
             await publisher.InvokeAsync<object>("PublishUnroutable");
 
-            await WaitFor(async () => (await Stats(publisher)).Value<long>("returned") == 1,
-                TimeSpan.FromSeconds(15), "the broker never returned the unroutable message");
+            await WaitFor(async () => (await Stats(publisher)).Value<long>("returned") > before,
+                TimeSpan.FromSeconds(30), "the broker never returned the unroutable message");
         }
 
         [TestMethod]
