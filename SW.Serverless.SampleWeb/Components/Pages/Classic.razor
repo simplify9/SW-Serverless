@@ -1,0 +1,211 @@
+@page "/classic"
+@rendermode InteractiveServer
+@inject IServiceProvider Services
+@inject IResidentAdapterHost Host
+
+<h1>Classic lifecycle</h1>
+<p class="lede">
+    The original per-invocation path, unchanged. <code>IServerlessService</code> is transient: each
+    call spawns <code>dotnet Adapter.dll</code>, runs one or more commands, and the process dies
+    when the scope ends. <code>SW.Serverless.Samples.Classic</code> calls <code>Runner.Run</code>
+    rather than <code>Runner.RunResident</code>, and its cloud metadata carries no
+    <code>Protocol</code> key — so the host takes the v1 code path for it, byte for byte.
+</p>
+
+<section class="card">
+    <h2>One process per call, or one for the whole run</h2>
+    <p class="sub">
+        Click <b>Who am I?</b> a few times and watch the classic pid change on every call. The
+        resident pid beside it does not move — that process was started once and is still there.
+    </p>
+
+    <div class="grid">
+        <div>
+            <span class="k">Classic — last pid</span>
+            <span class="v">@(classicPid?.ToString() ?? "—")</span>
+        </div>
+        <div>
+            <span class="k">Distinct pids seen</span>
+            <span class="v @(seenPids.Count > 1 ? "warn" : "")">@seenPids.Count</span>
+        </div>
+        <div>
+            <span class="k">Resident — pid</span>
+            <span class="v">@(ResidentPid()?.ToString() ?? "—")</span>
+        </div>
+        <div>
+            <span class="k">Resident restarts</span>
+            <span class="v">@ResidentRestarts()</span>
+        </div>
+    </div>
+
+    <div class="actions">
+        <button @onclick='() => Run("WhoAmI")' disabled="@busy">Who am I?</button>
+        <button @onclick="Startup" disabled="@busy">Expected startup values</button>
+        <button @onclick='() => Run("Configuration")' disabled="@busy">Configuration</button>
+    </div>
+    @if (seenPids.Count > 1)
+    {
+        <div class="banner warn">
+            @seenPids.Count distinct processes so far — one per call. That spawn plus JIT plus the
+            storage metadata check is exactly the cost the pooled resident shape removes.
+        </div>
+    }
+</section>
+
+<section class="card">
+    <h2>Commands</h2>
+    <p class="sub">
+        Public <code>Task</code> / <code>Task&lt;T&gt;</code> methods, discovered by name. Payloads
+        are JSON; the contract types live in the host's own SDK, never in SW.Serverless.
+    </p>
+    <div class="actions">
+        <button @onclick='() => Run("Summarize", SampleOrder)' disabled="@busy">Summarize (typed in and out)</button>
+        <button @onclick='() => Run("Echo", "hello from the sample web")' disabled="@busy">Echo</button>
+        <button @onclick='() => Run("GetCallLog")' disabled="@busy">Get call log</button>
+        <button class="danger" @onclick='() => Run("Fail")' disabled="@busy">Fail</button>
+        <button class="danger" @onclick='() => Run("Slow", "20", 2)' disabled="@busy">Slow (times out at 2s)</button>
+    </div>
+
+    <div class="actions">
+        <input @bind="command" placeholder="command" />
+        <input @bind="payload" placeholder="payload (optional)" class="wide" />
+        <button @onclick='() => Run(command, payload)' disabled="@busy">Invoke</button>
+    </div>
+
+    @if (busy)
+    {
+        <div class="banner warn">Spawning a process and invoking @command…</div>
+    }
+    @if (result is not null)
+    {
+        <pre class="result @(result.StartsWith("ERROR") ? "bad" : "")">@result</pre>
+    }
+</section>
+
+<section class="card">
+    <h2>What differs, and what does not</h2>
+    <div class="tw">
+        <table>
+            <thead><tr><th></th><th>Classic (this page)</th><th>Resident</th></tr></thead>
+            <tbody>
+                <tr><td>Entry point</td>
+                    <td class="mono">Runner.Run</td><td class="mono">Runner.RunResident</td></tr>
+                <tr><td>Process lifetime</td>
+                    <td>one caller, then exit</td><td>started once, stays running</td></tr>
+                <tr><td>Transport</td>
+                    <td>v1 stdin/stdout lines</td><td>gRPC over UDS / named pipe</td></tr>
+                <tr><td>Who initiates</td>
+                    <td>host only</td><td>both — the adapter pushes events too</td></tr>
+                <tr><td>Process-static state</td>
+                    <td>safe; one caller owns the process</td>
+                    <td>leaks between callers when pooled — needs <code>IResettable</code></td></tr>
+                <tr><td>Packaging and install</td>
+                    <td colspan="2" class="dim">Identical. Same zip, same metadata, same download and extract.</td></tr>
+                <tr><td>Selected by</td>
+                    <td colspan="2" class="dim">The <code>Protocol</code> key in cloud metadata. Absent means v1, byte for byte.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="sub">
+        Both adapters log through <code>AdapterLogger</code>, and both land on the
+        <a href="logs">Logs &amp; metrics</a> page under <code>serverless.adapters.{id}</code> — the
+        observability path did not change with the lifecycle.
+    </p>
+</section>
+
+@code {
+    const string SampleOrder =
+        "{\"Reference\":\"SO-4417\",\"Currency\":\"EUR\",\"Lines\":["
+        + "{\"Sku\":\"WID-1\",\"Quantity\":3,\"UnitPrice\":19.95},"
+        + "{\"Sku\":\"WID-7\",\"Quantity\":1,\"UnitPrice\":249.00}]}";
+
+    string command = "WhoAmI";
+    string payload = "";
+    string result;
+    bool busy;
+
+    int? classicPid;
+    readonly HashSet<int> seenPids = new();
+
+    int? ResidentPid() => Host.Describe()
+        .FirstOrDefault(h => h.AdapterId == DemoBootstrapper.TickerId)?.ProcessId;
+
+    int ResidentRestarts() => Host.Describe()
+        .FirstOrDefault(h => h.AdapterId == DemoBootstrapper.TickerId)?.RestartCount ?? 0;
+
+    async Task Startup()
+    {
+        busy = true;
+        result = null;
+        try
+        {
+            using var scope = Services.CreateScope();
+            var serverless = scope.ServiceProvider.GetRequiredService<IServerlessService>();
+            await serverless.StartAsync(DemoBootstrapper.ClassicId, Guid.NewGuid().ToString("N"));
+
+            // The {{expected}} protocol command: what Runner.Expect declared, so a UI knows
+            // what to prompt for — including which values are private.
+            var expected = await serverless.GetExpectedStartupValues();
+            result = string.Join("\n", expected.Select(kv =>
+                $"{kv.Key,-16} default={kv.Value.Default ?? "(none)"}  optional={kv.Value.Optional}  private={kv.Value.Private}"));
+        }
+        catch (Exception ex)
+        {
+            result = "ERROR  " + ex.Message;
+        }
+        finally { busy = false; }
+    }
+
+    async Task Run(string name, string body = null, int timeoutSeconds = 0)
+    {
+        busy = true;
+        result = null;
+        command = name;
+        try
+        {
+            // Resolved per call, deliberately: one IServerlessService wraps exactly one child
+            // process, and disposing the scope kills it.
+            using var scope = Services.CreateScope();
+            var serverless = scope.ServiceProvider.GetRequiredService<IServerlessService>();
+
+            await serverless.StartAsync(DemoBootstrapper.ClassicId, Guid.NewGuid().ToString("N"),
+                new Dictionary<string, string>
+                {
+                    ["BaseUrl"] = "https://api.example.test",
+                    ["ApiKey"] = "sample-key-not-a-real-secret",
+                    ["TimeoutSeconds"] = "30"
+                });
+
+            var value = await serverless.InvokeAsync<string>(name,
+                string.IsNullOrWhiteSpace(body) ? null : body, timeoutSeconds);
+
+            result = value ?? "(null)";
+            TrackPid(result);
+        }
+        catch (TimeoutException)
+        {
+            result = "ERROR  TimeoutException — the host gave up waiting.\n\n"
+                   + "Under v1 the child kept running and its late reply resolved the NEXT call's "
+                   + "completion. The host now removes the timed-out call, so the stale reply is "
+                   + "discarded instead. Click another command to confirm it answers correctly.";
+        }
+        catch (Exception ex)
+        {
+            result = "ERROR  " + ex.Message;
+        }
+        finally { busy = false; }
+    }
+
+    void TrackPid(string json)
+    {
+        var marker = "\"processId\":";
+        var at = json.IndexOf(marker, StringComparison.Ordinal);
+        if (at < 0) return;
+
+        var digits = new string(json[(at + marker.Length)..].TakeWhile(char.IsDigit).ToArray());
+        if (!int.TryParse(digits, out var pid)) return;
+
+        classicPid = pid;
+        seenPids.Add(pid);
+    }
+}

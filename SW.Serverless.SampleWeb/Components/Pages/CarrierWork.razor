@@ -1,0 +1,206 @@
+@page "/carrier"
+@rendermode InteractiveServer
+@inject IResidentAdapterHost Host
+@inject SW.Serverless.SampleWeb.Telemetry.DashboardState State
+
+<h1>A typical adapter, resident</h1>
+<p class="lede">
+    <code>sample.carrier</code> does the work a Traxis agent adapter does: takes the host's own
+    shipment type, translates it to the carrier's API, calls it over gRPC with deadlines and
+    retries, and returns the host's own result type. It is built entirely on constructor
+    injection — options bound from startup values, a pooled gRPC client, a session-scoped call
+    log, and an <code>ILogger</code>.
+</p>
+
+<section class="card">
+    <h2>The call is identical to a classic adapter's</h2>
+    <div class="two-up">
+        <div>
+            <div class="k">Classic — a process per call</div>
+<pre class="code">using var scope = services.CreateScope();
+var serverless = scope.ServiceProvider
+    .GetRequiredService&lt;IServerlessService&gt;();
+
+await serverless.StartAsync(adapterId, correlationId, settings);
+
+var result = await serverless
+    .InvokeAsync&lt;ShipmentResult&gt;("CreateShipment", request);</pre>
+        </div>
+        <div>
+            <div class="k">Resident — a warm instance from the pool</div>
+<pre class="code">await using var lease = await adapters.RentAsync(spec);
+
+var result = await lease
+    .InvokeAsync&lt;ShipmentResult&gt;("CreateShipment", request);
+
+// lease disposal calls ResetAsync(sessionId),
+// so the call log cannot leak into the next caller</pre>
+        </div>
+    </div>
+    <p class="sub">
+        Same command name, same JSON payload, same result type. What changes is underneath: no
+        process spawn, no JIT, no storage metadata check, and a gRPC channel that stays open
+        across calls rather than being dialled and discarded each time.
+    </p>
+</section>
+
+<section class="card">
+    <h2>Create a shipment</h2>
+    <div class="actions">
+        <input @bind="reference" placeholder="reference" />
+        <input @bind="city" placeholder="destination city" />
+        <input @bind="weight" type="number" step="0.1" placeholder="weight kg" style="min-width:110px" />
+        <button @onclick="Create" disabled="@busy">Create shipment</button>
+        <button @onclick="() => { weight = 40; }" disabled="@busy">Set 40 kg (carrier rejects)</button>
+    </div>
+    <p class="sub">
+        A carrier rejection — no account, no parcels, over 31.5 kg — comes back as
+        <code>Succeeded = false</code> with a code, not as an exception. Turning a business
+        outcome into an adapter outage is the mistake a third of the Traxis adapters make by
+        deriving from raw <code>AdapterBase</code>.
+    </p>
+
+    @if (lastResult is not null)
+    {
+        <pre class="result @(lastResult.StartsWith("ERROR") ? "bad" : "")">@lastResult</pre>
+    }
+</section>
+
+@if (tracking.Count > 0)
+{
+    <section class="card">
+        <h2>Track</h2>
+        <p class="sub">The simulated carrier adds traces as a shipment ages — track again after a few seconds.</p>
+        <div class="actions">
+            @foreach (var number in tracking)
+            {
+                <button @onclick="() => Track(number)" disabled="@busy">@number</button>
+            }
+        </div>
+        @if (trackResult is not null)
+        {
+            <pre class="result">@trackResult</pre>
+        }
+    </section>
+}
+
+<section class="card">
+    <h2>Upstream failure and per-session logs</h2>
+    <div class="grid">
+        <div><span class="k">Carrier latency</span><span class="v">@CarrierSim.CarrierService.LatencyMs ms</span></div>
+        <div><span class="k">Carrier failure rate</span><span class="v @(CarrierSim.CarrierService.FailurePercent > 0 ? "warn" : "")">@CarrierSim.CarrierService.FailurePercent%</span></div>
+        <div><span class="k">Round trips measured</span><span class="v">@calls</span></div>
+        <div><span class="k">Last round trip</span><span class="v">@lastMs ms</span></div>
+    </div>
+    <div class="actions">
+        <button @onclick="() => CarrierSim.CarrierService.FailurePercent = 0">Healthy</button>
+        <button @onclick="() => CarrierSim.CarrierService.FailurePercent = 40">Fail 40% of calls</button>
+        <button @onclick="() => CarrierSim.CarrierService.LatencyMs = 400">Slow to 400 ms</button>
+        <button @onclick="() => CarrierSim.CarrierService.LatencyMs = 40">Fast again</button>
+    </div>
+    <p class="sub">
+        With failures on, the adapter retries transient <code>Unavailable</code> replies up to
+        <code>MaxAttempts</code> and only then returns <code>UPSTREAM_UNAVAILABLE</code>. Watch
+        <b>retries</b> and <b>upstreamFailures</b> on the Adapters page, and the warnings on
+        Logs &amp; metrics.
+    </p>
+</section>
+
+@code {
+    string reference = "SO-2001";
+    string city = "Amsterdam";
+    double weight = 2.5;
+    bool busy;
+    string lastResult, trackResult;
+    int calls, lastMs;
+    readonly List<string> tracking = new();
+
+    async Task Create()
+    {
+        busy = true;
+        lastResult = null;
+        try
+        {
+            var request = new
+            {
+                Reference = reference,
+                Service = "EXPRESS",
+                Sender = new { Name = "Warehouse 1", Street = "Dock 4", City = "Rotterdam", PostCode = "3011", Country = "NL" },
+                Recipient = new { Name = "A. Customer", Street = "1 High Street", City = city, PostCode = "1011", Country = "NL" },
+                Pieces = new[] { new { Weight = weight, Length = 30, Width = 20, Height = 15 } }
+            };
+
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+
+            // A pooled lease: a warm instance is checked out for this call and returned after,
+            // with ResetAsync clearing the session's audit trail on the way out.
+            await using var lease = await Host.RentAsync(new AdapterSpec
+            {
+                AdapterId = DemoBootstrapper.CarrierId,
+                StartupValues = CarrierSettings,
+                AdapterValues = { ["Poolable"] = "true", ["PoolSize"] = "3" }
+            });
+
+            var result = await lease.InvokeAsync<string>("CreateShipment", request, timeoutSeconds: 30);
+
+            // Exactly what Gateway does: fetch the audit trail right after the command.
+            var logs = await lease.InvokeAsync<string>("GetLogs", timeoutSeconds: 15);
+
+            clock.Stop();
+            calls++;
+            lastMs = (int)clock.ElapsedMilliseconds;
+
+            lastResult = $"CreateShipment -> {result}\n\nGetLogs -> {logs}";
+
+            var at = result?.IndexOf("\"TrackingNumber\":\"", StringComparison.Ordinal) ?? -1;
+            if (at >= 0)
+            {
+                var number = result[(at + 18)..];
+                number = number[..number.IndexOf('"')];
+                if (number.Length > 0 && !tracking.Contains(number)) tracking.Insert(0, number);
+            }
+        }
+        catch (AdapterInvocationException ex)
+        {
+            lastResult = $"ERROR  {ex.AdapterExceptionType}: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            lastResult = "ERROR  " + ex.Message;
+        }
+        finally { busy = false; }
+    }
+
+    async Task Track(string number)
+    {
+        busy = true;
+        trackResult = null;
+        try
+        {
+            await using var lease = await Host.RentAsync(new AdapterSpec
+            {
+                AdapterId = DemoBootstrapper.CarrierId,
+                StartupValues = CarrierSettings,
+                AdapterValues = { ["Poolable"] = "true", ["PoolSize"] = "3" }
+            });
+
+            trackResult = await lease.InvokeAsync<string>("Track",
+                new { TrackingNumber = number }, timeoutSeconds: 30);
+        }
+        catch (Exception ex)
+        {
+            trackResult = "ERROR  " + ex.Message;
+        }
+        finally { busy = false; }
+    }
+
+    static Dictionary<string, string> CarrierSettings => new()
+    {
+        ["BaseUrl"] = "http://localhost:5200",
+        ["Account"] = "SW-ACCT-9931",
+        ["ApiKey"] = "sample-key-not-a-real-secret",
+        ["DefaultService"] = "EXPRESS",
+        ["MaxAttempts"] = "3",
+        ["TimeoutSeconds"] = "15"
+    };
+}
