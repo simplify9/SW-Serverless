@@ -20,6 +20,10 @@ namespace SW.Serverless.Sdk
 
         private static IReadOnlyDictionary<string, string> startupValues;
 
+        /// <summary>Everything the host sent, for binding into IConfiguration.</summary>
+        public static IReadOnlyDictionary<string, string> StartupValues =>
+            startupValues ?? new Dictionary<string, string>();
+
         private static readonly IDictionary<string, StartupValue> expectedStartupValues =
             new Dictionary<string, StartupValue>(StringComparer.OrdinalIgnoreCase);
 
@@ -33,6 +37,21 @@ namespace SW.Serverless.Sdk
 
             BuildMethodsDictionary(commandHandler);
         }
+
+        /// <summary>
+        /// Entry point for an adapter that STAYS RUNNING. Same zip, same spawn, same installation —
+        /// only this line differs from Run(). See the design doc, section 15.2.
+        /// </summary>
+        public static Task RunResident(object commandHandler) =>
+            Resident.ResidentRunner.RunAsync(commandHandler);
+
+        /// <summary>
+        /// Classic lifecycle with the handler built LAZILY, after argv has been parsed. This is
+        /// what makes constructor injection of startup values safe — the plain
+        /// Run(new Handler()) form constructs the handler first, so reading a startup value in a
+        /// constructor kills the process before it can report anything.
+        /// </summary>
+        public static Task Run(Func<object> handlerFactory) => Run((object)handlerFactory);
 
         async public static Task Run(object commandHandler)
         {
@@ -81,6 +100,9 @@ namespace SW.Serverless.Sdk
                 {
                     AdapterLogger.LogWarning(ex, $"Failed to parse AdapterValues.");
                 }
+
+                // A factory is resolved HERE, once argv is parsed and Runner's statics are set.
+                if (commandHandler is Func<object> factory) commandHandler = factory();
 
                 var methodsDictionary = BuildMethodsDictionary(commandHandler);
 

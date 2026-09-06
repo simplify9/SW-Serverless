@@ -32,13 +32,27 @@ namespace SW.Serverless
         private bool processStarted;
         private volatile bool timedOut;
         private ILogger adapterLogger;
-        private readonly ICloudFilesService cloudFilesService; 
+        private readonly ICloudFilesService cloudFilesService;
+        private readonly AdapterInstaller installer;
+        /// <summary>
+        /// Additive overload for hosts that never install adapters from cloud storage — the
+        /// StartAsync(adapterId, correlationId, adapterPath, ...) path needs no ICloudFilesService.
+        /// DI selects this automatically when none is registered.
+        /// </summary>
+        public ServerlessService(ServerlessOptions serverlessOptions, IMemoryCache memoryCache,
+            ILoggerFactory loggerFactory, IServiceProvider serviceProvider)
+            : this(serverlessOptions, memoryCache, loggerFactory, serviceProvider,
+                   serviceProvider.GetService<ICloudFilesService>())
+        {
+        }
+
         public ServerlessService(ServerlessOptions serverlessOptions, IMemoryCache memoryCache, ILoggerFactory loggerFactory, IServiceProvider serviceProvider, ICloudFilesService cloudFilesService)
         {
             this.serverlessOptions = serverlessOptions;
             this.memoryCache = memoryCache;
             this.loggerFactory = loggerFactory;
             this.cloudFilesService = cloudFilesService;
+            installer = new AdapterInstaller(serverlessOptions, memoryCache, cloudFilesService);
 
             logger = loggerFactory.CreateLogger<ServerlessService>();
 
@@ -81,8 +95,16 @@ namespace SW.Serverless
             if (processStarted)
                 throw new Exception("Already started.");
 
-            if (startupValues == null) startupValues = new Dictionary<string, string>();
-            startupValues.Add(Constants.CorrelationIdName, correlationId);
+            // Copy rather than mutate. The caller's dictionary is often a long-lived entity's own
+            // settings — Traxis passes agent.Settings straight in — so adding CorrelationId to it
+            // leaked into that entity, and a second call with the same dictionary threw
+            // "An item with the same key has already been added".
+            var values = startupValues == null
+                ? new Dictionary<string, string>()
+                : new Dictionary<string, string>(startupValues);
+
+            values[Constants.CorrelationIdName] = correlationId;
+            startupValues = values;
 
             adapterLogger = loggerFactory.CreateLogger($"{adaptersNamingPrefix}.{adapterId}".ToLower());
 
@@ -286,80 +308,15 @@ namespace SW.Serverless
 
         async Task<AdapterMetadata> Install(string adapterId)
         {
-            var adapterMetadata = await GetAdapterMetadata(adapterId);
-            var adapterDiretoryPath = $"{serverlessOptions.AdapterLocalPath}/{adapterMetadata.Hash}";
-            //var adapterPath = Path.GetFullPath($"{adapterDiretoryPath}/{adapterConfig.EntryAssembly}");
-
-            await semaphoreSlim.WaitAsync();
-            try
+            var installed = await installer.InstallAsync(adapterId);
+            return new AdapterMetadata
             {
-                if (!Directory.Exists(adapterDiretoryPath))
-                {
-                    Directory.CreateDirectory(adapterDiretoryPath);
-                    try
-                    {
-                        //using var cloudFilesService = new CloudFilesService(serverlessOptions.CloudFilesOptions);
-                        using var stream = await cloudFilesService.OpenReadAsync($"{serverlessOptions.AdapterRemotePath}/{adapterId}".ToLower());
-                        using var archive = new ZipArchive(stream);
-
-                        foreach (var entry in archive.Entries)
-                        {
-                            var path = $"{adapterDiretoryPath}/{entry.FullName.Replace("\\", "/")}";
-                            Directory.CreateDirectory(Path.GetDirectoryName(path));
-                            entry.ExtractToFile(path);
-                        }
-
-
-                        //Process.Start("chmod", $"755 {adapterPath}").WaitForExit(5000);
-                    }
-                    catch (Exception)
-                    {
-                        Directory.Delete(adapterDiretoryPath, true);
-                        throw;
-                    }
-                }
-            }
-            finally
-            {
-                semaphoreSlim.Release();
-            }
-
-            return adapterMetadata;
-        }
-
-        async Task<AdapterMetadata> GetAdapterMetadata(string adapterId)
-        {
-            if (memoryCache.TryGetValue($"{adaptersNamingPrefix}.{adapterId}", out AdapterMetadata adapterMetadata))
-                return adapterMetadata;
-
-            //using var cloudFilesService = new CloudFilesService(serverlessOptions.CloudFilesOptions);
-
-            var metadataPath = $"{serverlessOptions.AdapterRemotePath}/{adapterId}".ToLower();
-            var cloudMetadata = await cloudFilesService.GetMetadataAsync(metadataPath);
-            var metaData = new Dictionary<string, string>(cloudMetadata, StringComparer.OrdinalIgnoreCase);
-
-            if (!metaData.TryGetValue("EntryAssembly", out var entryAssembly) ||
-                string.IsNullOrWhiteSpace(entryAssembly))
-                throw new InvalidOperationException(
-                    $"Adapter '{adapterId}' metadata at '{metadataPath}' is missing 'EntryAssembly'.");
-
-            if (!metaData.TryGetValue("Hash", out var hash) || string.IsNullOrWhiteSpace(hash))
-                throw new InvalidOperationException(
-                    $"Adapter '{adapterId}' metadata at '{metadataPath}' is missing 'Hash'.");
-
-            adapterMetadata = new AdapterMetadata
-            {
-                EntryAssembly = entryAssembly,
-                Hash = hash,
-                AdapterValues = metaData
+                Hash = installed.Hash,
+                EntryAssembly = installed.EntryAssembly,
+                LocalPath = installed.LocalPath,
+                AdapterValues = installed.AdapterValues
             };
-
-            adapterMetadata.LocalPath = Path.GetFullPath($"{serverlessOptions.AdapterLocalPath}/{adapterMetadata.Hash}/{adapterMetadata.EntryAssembly}");
-
-
-            return memoryCache.Set($"{adaptersNamingPrefix}.{adapterId}", adapterMetadata, TimeSpan.FromMinutes(serverlessOptions.AdapterMetadataCacheDuration));
         }
-
 
         public void Dispose()
         {

@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SW.PrimitiveTypes;
+using SW.Serverless.UnitTests.Fixtures;
 using System.Threading.Tasks;
 
 namespace SW.Serverless.UnitTests
@@ -16,17 +17,24 @@ namespace SW.Serverless.UnitTests
 
 
         [ClassInitialize]
-        public static void ClassInitialize(TestContext tcontext)
+        public static async Task ClassInitialize(TestContext tcontext)
         {
             server = new TestServer(WebHost.CreateDefaultBuilder()
                 .UseDefaultServiceProvider((context, options) => { options.ValidateScopes = true; })
                 .UseEnvironment(Environments.Development)
                 .UseStartup<TestStartup>());
+
+            // Publish the test adapter into the local store under both ids the tests use, so
+            // installation is exercised rather than assumed.
+            var cloudFiles = server.Host.Services.GetRequiredService<ICloudFilesService>();
+            foreach (var adapterId in new[] { "unittests.adapter.5", "unittests.adapter.test" })
+                await TestStore.PublishAsync(cloudFiles, adapterId, "SW.Serverless.UnitTests.Adapter");
         }
 
         [ClassCleanup]
         public static void ClassCleanup()
         {
+            server.Host.Services.GetRequiredService<SW.CloudFiles.LocalTests.CloudFilesService>().Cleanup();
             server.Dispose();
         }
 
