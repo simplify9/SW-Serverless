@@ -239,6 +239,7 @@ namespace SW.Serverless.Resident
             supervised.MissedHeartbeats = 0;
             supervised.DrainRequested = false;
             supervised.LastCpuSampleOn = null;
+            supervised.CpuOverSamples = 0;
             _ = instance.DisposeAsync().AsTask();
 
             if (supervised.Quarantined)
@@ -264,6 +265,92 @@ namespace SW.Serverless.Resident
                     logger.LogError(ex, "Restart of {AdapterId} failed.", instance.AdapterId);
                 }
             });
+        }
+
+        public Task<LimitUpdate> UpdateLimitsAsync(string adapterId, string instanceKey,
+            ResourceLimits limits, CancellationToken cancellationToken = default)
+        {
+            if (limits == null) throw new ArgumentNullException(nameof(limits));
+
+            if (!instances.TryGetValue(Key(adapterId, instanceKey), out var supervised))
+                return Task.FromResult(new LimitUpdate { Applied = false, Reason = "No such instance." });
+
+            var spec = supervised.Spec;
+            var hardChanged = limits.HardMemoryLimitBytes != spec.HardMemoryLimitBytes;
+
+            spec.SoftMemoryLimitBytes = limits.SoftMemoryLimitBytes;
+            spec.HardMemoryLimitBytes = limits.HardMemoryLimitBytes;
+            spec.CpuPercentLimit = limits.CpuPercentLimit;
+            spec.CpuLimitSamples = limits.CpuLimitSamples;
+
+            // A lowered CPU ceiling should not trip on a streak the adapter accumulated under the
+            // old one — that would recycle it for something it did before the rule existed.
+            supervised.CpuOverSamples = 0;
+
+            logger.LogInformation("Adapter {AdapterId}/{InstanceKey} limits set to {Limits}.",
+                adapterId, instanceKey, limits);
+
+            return Task.FromResult(new LimitUpdate
+            {
+                Applied = true,
+                Limits = limits,
+                // The soft and CPU ceilings are read from the spec on every sample, so they are
+                // already in force. The hard one was handed to the runtime as a GC heap limit when
+                // the process launched, and nothing can change that in place.
+                RestartRequired = hardChanged && limits.HardMemoryLimitBytes > 0,
+                Reason = hardChanged && limits.HardMemoryLimitBytes > 0
+                    ? "The hard memory ceiling is the runtime's own GC heap limit, set when the "
+                      + "process launched. It applies from the next restart."
+                    : null,
+            });
+        }
+
+        public async Task<ResidentAdapterInstance> RestartAsync(string adapterId, string instanceKey,
+            bool drain = true, CancellationToken cancellationToken = default)
+        {
+            if (!instances.TryGetValue(Key(adapterId, instanceKey), out var supervised))
+                throw new InvalidOperationException(
+                    $"No resident adapter '{adapterId}' with instance key '{instanceKey}' is running here.");
+
+            // Relaunch in place: the entry stays in the registry under the same key, so whatever
+            // owns this instance — a lease, a data source, a caller holding the key — still points
+            // at it afterwards. Stopping and starting instead would drop the entry and, in
+            // Bitween's case, release the broker lease that makes the connection exclusive.
+            //
+            // Stopping is set for the teardown so the exit does not look like a crash and trigger
+            // the backoff restart; this method does the relaunch itself.
+            supervised.Stopping = true;
+            try
+            {
+                var old = supervised.Instance;
+                if (old != null)
+                {
+                    old.RequestShutdown("restart requested", drain);
+                    var deadline = drain ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(5);
+                    if (old.Process != null && !old.Process.HasExited)
+                        await Task.Run(() => old.Process.WaitForExit((int)deadline.TotalMilliseconds),
+                            cancellationToken);
+
+                    TryKill(old.Process);
+                    await old.DisposeAsync();
+                }
+
+                supervised.MissedHeartbeats = 0;
+                supervised.DrainRequested = false;
+                supervised.LastCpuSampleOn = null;
+                supervised.CpuOverSamples = 0;
+            }
+            finally
+            {
+                supervised.Stopping = false;
+            }
+
+            await SpawnAsync(supervised, cancellationToken);
+
+            logger.LogInformation("Adapter {AdapterId}/{InstanceKey} restarted on request.",
+                adapterId, instanceKey);
+
+            return supervised.Instance;
         }
 
         public async Task StopAsync(string adapterId, string instanceKey, bool drain = true,
@@ -327,7 +414,11 @@ namespace SW.Serverless.Resident
             StartupValues = spec.StartupValues,
             AdapterValues = spec.AdapterValues,
             SoftMemoryLimitBytes = spec.SoftMemoryLimitBytes,
-            HardMemoryLimitBytes = spec.HardMemoryLimitBytes
+            HardMemoryLimitBytes = spec.HardMemoryLimitBytes,
+            // Easy to miss, and silent when missed: a pooled adapter would run with the memory
+            // ceilings its spec asked for and no CPU ceiling at all.
+            CpuPercentLimit = spec.CpuPercentLimit,
+            CpuLimitSamples = spec.CpuLimitSamples
         };
 
         // ------------------------------------------------------------------ lookups
@@ -362,6 +453,7 @@ namespace SW.Serverless.Resident
                 LastHeartbeatOn = supervised.LastHeartbeatOn,
                 Capabilities = instance.Capabilities,
                 Commands = instance.Commands,
+                CommandDetails = instance.CommandDetails,
                 SdkVersion = instance.SdkVersion,
                 ProtocolVersion = instance.ProtocolVersion,
                 StartupValues = instance.StartupValues,
@@ -462,6 +554,31 @@ namespace SW.Serverless.Resident
                     ? supervised.Spec.SoftMemoryLimitBytes : options.SoftMemoryLimitBytes;
                 var hard = supervised.Spec.HardMemoryLimitBytes > 0
                     ? supervised.Spec.HardMemoryLimitBytes : options.HardMemoryLimitBytes;
+                var cpuLimit = supervised.Spec.CpuPercentLimit > 0
+                    ? supervised.Spec.CpuPercentLimit : options.CpuPercentLimit;
+                var cpuSamples = supervised.Spec.CpuLimitSamples > 0
+                    ? supervised.Spec.CpuLimitSamples : Math.Max(1, options.CpuLimitSamples);
+
+                // CPU is judged over consecutive samples, never on one. An adapter draining a
+                // backlog is supposed to peg a core; only a run of samples separates that from a
+                // loop that will never stop. The first sample after a launch has no elapsed wall
+                // time behind it, so it is not counted.
+                if (cpuLimit > 0 && supervised.CpuPercent > 0)
+                {
+                    if (supervised.CpuPercent > cpuLimit) supervised.CpuOverSamples++;
+                    else supervised.CpuOverSamples = 0;
+
+                    if (supervised.CpuOverSamples >= cpuSamples && !supervised.DrainRequested)
+                    {
+                        supervised.DrainRequested = true;
+                        supervised.CpuOverSamples = 0;
+                        logger.LogWarning(
+                            "Adapter {AdapterId}/{InstanceKey} held {Cpu}% CPU across {Samples} samples (limit {Limit}%); asking it to drain.",
+                            instance.AdapterId, instance.InstanceKey, supervised.CpuPercent, cpuSamples, cpuLimit);
+                        instance.RequestShutdown("sustained cpu limit", drain: true);
+                        return;
+                    }
+                }
 
                 // Soft first: draining lets in-flight messages be nacked. A hard kill cannot.
                 if (soft > 0 && rss > soft && !supervised.DrainRequested)
@@ -504,6 +621,9 @@ namespace SW.Serverless.Resident
             public int LastThreadCount;
             public double CpuPercent;
             public TimeSpan LastCpu;
+
+            /// <summary>Consecutive samples above the CPU ceiling. Reset by any sample under it.</summary>
+            public int CpuOverSamples;
             public DateTimeOffset? LastCpuSampleOn;
             public DateTimeOffset? LastHeartbeatOn;
             readonly List<DateTimeOffset> crashes = new();
