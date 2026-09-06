@@ -34,7 +34,9 @@ jobs:
       - name: Pack and Push NuGet Packages
         uses: simplify9/.github/.github/actions/dotnet-pack-push@main
         with:
-          projects: "SW.Serverless/SW.Serverless.csproj SW.Serverless.Sdk/SW.Serverless.Sdk.csproj"
+          # Contract FIRST: both of the others depend on it, and publishing them without it
+          # produces packages whose dependency cannot resolve — which is what 8.1.13 shipped as.
+          projects: "SW.Serverless.Contract/SW.Serverless.Contract.csproj SW.Serverless/SW.Serverless.csproj SW.Serverless.Sdk/SW.Serverless.Sdk.csproj"
           configuration: "Release"
           version: ${{ steps.semver.outputs.version }}
           api-key: ${{ secrets.SWNUGETKEY }}
