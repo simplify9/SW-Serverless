@@ -20,6 +20,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\SW.Serverless\SW.Serverless.csproj" />
+        <ProjectReference Include="..\SW.Serverless.Samples.CarrierContract\SW.Serverless.Samples.CarrierContract.csproj" />
         <!-- Build order only. The adapters are packaged and launched as separate processes. -->
         <ProjectReference Include="..\SW.Serverless.Samples.Ticker\SW.Serverless.Samples.Ticker.csproj"
                           ReferenceOutputAssembly="false" />
@@ -32,6 +33,8 @@
         <ProjectReference Include="..\SW.Serverless.Samples.RabbitConsumer\SW.Serverless.Samples.RabbitConsumer.csproj"
                           ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\SW.Serverless.Samples.LargeFiles\SW.Serverless.Samples.LargeFiles.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.Carrier\SW.Serverless.Samples.Carrier.csproj"
                           ReferenceOutputAssembly="false" />
     </ItemGroup>
 

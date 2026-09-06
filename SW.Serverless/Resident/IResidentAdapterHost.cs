@@ -10,6 +10,14 @@ namespace SW.Serverless.Resident
     {
         ResidentAdapterInstance Instance { get; }
         string SessionId { get; }
+
+        /// <summary>
+        /// Invoke with this lease's session id attached, so several calls in one checkout share a
+        /// session — which is what makes the call-a-command-then-GetLogs pattern work, and what
+        /// disposal then clears through IResettable.
+        /// </summary>
+        Task<TResult> InvokeAsync<TResult>(string command, object input = null,
+            int timeoutSeconds = 0, CancellationToken cancellationToken = default);
     }
 
     /// <summary>

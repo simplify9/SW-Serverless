@@ -100,6 +100,10 @@ namespace SW.Serverless.Resident
             public ResidentAdapterInstance Instance { get; }
             public string SessionId { get; }
 
+            public Task<TResult> InvokeAsync<TResult>(string command, object input = null,
+                int timeoutSeconds = 0, CancellationToken cancellationToken = default) =>
+                Instance.InvokeAsync<TResult>(command, input, timeoutSeconds, cancellationToken, SessionId);
+
             public ValueTask DisposeAsync() => new(pool.ReturnAsync(Instance, SessionId));
         }
     }

@@ -237,9 +237,11 @@ namespace SW.Serverless.Resident
         void Send(HostFrame frame) => outbound.Writer.TryWrite(frame);
 
         public async Task<TResult> InvokeAsync<TResult>(string command, object input = null,
-            int timeoutSeconds = 0, CancellationToken cancellationToken = default)
+            int timeoutSeconds = 0, CancellationToken cancellationToken = default,
+            string sessionId = null)
         {
-            var bytes = await InvokeAsync(command, Serialize(input), timeoutSeconds, cancellationToken);
+            var bytes = await InvokeAsync(command, Serialize(input), timeoutSeconds,
+                cancellationToken, sessionId);
             if (bytes == null || bytes.Length == 0) return default;
             if (typeof(TResult) == typeof(byte[])) return (TResult)(object)bytes;
             var text = System.Text.Encoding.UTF8.GetString(bytes);
@@ -248,7 +250,8 @@ namespace SW.Serverless.Resident
         }
 
         public async Task<byte[]> InvokeAsync(string command, byte[] payload = null,
-            int timeoutSeconds = 0, CancellationToken cancellationToken = default)
+            int timeoutSeconds = 0, CancellationToken cancellationToken = default,
+            string sessionId = null)
         {
             if (State != InstanceState.Ready)
                 throw new InvalidOperationException($"Adapter {AdapterId} is {State}, not Ready.");
@@ -281,7 +284,8 @@ namespace SW.Serverless.Resident
                 {
                     Command = command,
                     Payload = payload == null ? ByteString.Empty : ByteString.CopyFrom(payload),
-                    TimeoutSeconds = (int)timeout.TotalSeconds
+                    TimeoutSeconds = (int)timeout.TotalSeconds,
+                    SessionId = sessionId ?? ""
                 }
             });
 

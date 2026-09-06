@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+option csharp_namespace = "SW.Serverless.Samples.CarrierContract";
+package sw.samples.carrier.v1;
+
+// A stand-in for a real carrier's API — the kind of upstream a Traxis agent adapter talks to.
+// It belongs to the CARRIER, not to SW.Serverless: the adapter's job is to translate between
+// this and whatever the host's own SDK defines.
+service Carrier {
+    rpc CreateShipment (CreateShipmentRequest) returns (CreateShipmentReply);
+    rpc Track (TrackRequest) returns (TrackReply);
+    rpc CancelShipment (CancelRequest) returns (CancelReply);
+    rpc Ping (PingRequest) returns (PingReply);
+}
+
+message Address {
+    string name = 1;
+    string line1 = 2;
+    string city = 3;
+    string postcode = 4;
+    string country = 5;
+}
+
+message Parcel {
+    double weight_kg = 1;
+    int32 length_cm = 2;
+    int32 width_cm = 3;
+    int32 height_cm = 4;
+}
+
+message CreateShipmentRequest {
+    string account = 1;
+    string reference = 2;
+    Address sender = 3;
+    Address recipient = 4;
+    repeated Parcel parcels = 5;
+    string service = 6;
+}
+
+message CreateShipmentReply {
+    bool accepted = 1;
+    string tracking_number = 2;
+    string label_url = 3;
+    double price = 4;
+    string currency = 5;
+    string error_code = 6;
+    string error_message = 7;
+}
+
+message TrackRequest {
+    string account = 1;
+    string tracking_number = 2;
+}
+
+message Trace {
+    string status = 1;
+    string description = 2;
+    string location = 3;
+    int64 occurred_unix_ms = 4;
+}
+
+message TrackReply {
+    bool found = 1;
+    string tracking_number = 2;
+    string current_status = 3;
+    repeated Trace traces = 4;
+}
+
+message CancelRequest {
+    string account = 1;
+    string tracking_number = 2;
+}
+
+message CancelReply {
+    bool cancelled = 1;
+    string error_message = 2;
+}
+
+message PingRequest {}
+
+message PingReply {
+    string version = 1;
+    int64 server_time_unix_ms = 2;
+}

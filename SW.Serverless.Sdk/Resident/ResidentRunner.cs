@@ -220,7 +220,11 @@ namespace SW.Serverless.Sdk.Resident
                 if (!commands.TryGetValue(invoke.Command, out var method))
                     throw new MissingMethodException(handlerType.FullName, invoke.Command);
 
-                using var session = AdapterSession.Begin(id.ToString(), invoke.Command);
+                // The host's session id when it grouped this call with others, otherwise the
+                // call stands alone.
+                using var session = AdapterSession.Begin(
+                    string.IsNullOrEmpty(invoke.SessionId) ? id.ToString() : invoke.SessionId,
+                    invoke.Command);
 
                 object arg = null;
                 if (method.ParameterType != null && !invoke.Payload.IsEmpty)

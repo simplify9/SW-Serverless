@@ -41,6 +41,11 @@ message Invoke {
     string command = 1;
     bytes payload = 2;
     int32 timeout_seconds = 3;
+
+    // Groups several invocations into one logical session — a pooled lease, or one inbound
+    // request. Traxis calls a command and then GetLogs; both must see the SAME session or the
+    // audit trail comes back empty. Absent means "this call alone".
+    string session_id = 4;
 }
 
 message Ping {}

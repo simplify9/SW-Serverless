@@ -25,6 +25,7 @@
     <ItemGroup>
         <ProjectReference Include="..\SW.Serverless.Installer\SW.Serverless.Installer.csproj" />
         <ProjectReference Include="..\SW.Serverless\SW.Serverless.csproj" />
+        <ProjectReference Include="..\SW.Serverless.Samples.CarrierContract\SW.Serverless.Samples.CarrierContract.csproj" />
         <!-- Build order only: these are packaged and launched as separate processes. -->
         <ProjectReference Include="..\SW.Serverless.UnitTests.Adapter\SW.Serverless.UnitTests.Adapter.csproj"
                           ReferenceOutputAssembly="false" />
@@ -37,6 +38,8 @@
         <ProjectReference Include="..\SW.Serverless.Samples.RabbitConsumer\SW.Serverless.Samples.RabbitConsumer.csproj"
                           ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\SW.Serverless.Samples.LargeFiles\SW.Serverless.Samples.LargeFiles.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.Carrier\SW.Serverless.Samples.Carrier.csproj"
                           ReferenceOutputAssembly="false" />
     </ItemGroup>
 

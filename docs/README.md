@@ -90,6 +90,8 @@ the download, extract and launch steps are exercised, not skipped. That is the
 | `SW.Serverless.Samples.RabbitPublisher` | **Egress.** Publishes every 10 ms (~100/s) with publisher confirms and `mandatory: true`, so unroutable messages come back through `BasicReturn` instead of vanishing. `SetInterval` changes the rate while running. |
 | `SW.Serverless.Samples.RabbitConsumer` | **Ingress.** Declares a queue and binding, consumes with `autoAck: false`, and **only calls `BasicAck` after the host has acknowledged**. A host rejection becomes `BasicNack(requeue: true)`. This is the ordering to copy for a Kafka offset commit. `SetPrefetch` changes the broker-side backpressure dial at runtime. |
 | `SW.Serverless.Samples.LargeFiles` | **Streaming, and what visibility looks like under load.** Streams a file in configurable chunks and pushes each to the host, so resident memory tracks the *chunk* size and not the file size. Reports percent, MB/s, ETA and its own working set on the heartbeat, which the dashboard renders as a live progress bar. `GenerateTestFile` makes a file of any size on demand; `Pause` / `Resume` hold a transfer mid-file. Built entirely on constructor injection — options, a reader service, a throughput meter and an `ILogger`. |
+| `SW.Serverless.Samples.Carrier` | **A typical adapter, resident.** Does what a Traxis agent adapter does — takes the host's shipment type, translates it to a carrier's gRPC API, calls it with deadlines and retries, returns the host's result type. The host invokes it *exactly* as it invokes a classic adapter; what changes is underneath. Built on constructor injection: options, a pooled gRPC client, a session-scoped call log, an `ILogger`. Implements `IResettable`, so it is safely poolable. |
+| `SW.Serverless.Samples.CarrierContract` | The carrier's own `.proto`. It belongs to the carrier, not to SW.Serverless — the adapter's job is translating between it and the host's SDK types. |
 | `SW.Serverless.Samples.Classic` | A conventional **non-resident** adapter — `Runner.Run`, no `Protocol` metadata key, so the host takes the v1 path for it byte for byte. Shows startup values and the `{{expected}}` schema, typed commands, `AdapterLogger`, failures and timeouts, and process-static state. |
 | `SW.Serverless.Samples.Host` | Console host. Implements `IAdapterEventSink`, starts both adapters, prints events and heartbeats. |
 | `SW.Serverless.SampleWeb` | Blazor Server dashboard plus minimal APIs. Live adapter health, event feed, adapter logs and metrics, failure injection, and a page for the classic per-invocation lifecycle to contrast against. |
@@ -126,6 +128,32 @@ is also how broker credentials stop showing up in `ps aux`.
 * **Credit window** — `MaxInFlight` bounds unacknowledged events, so an adapter reading faster
   than the host persists cannot buffer its way to an OOM.
 
+## Calling a resident adapter like a classic one
+
+```csharp
+// Classic — a process per call
+using var scope = services.CreateScope();
+var serverless = scope.ServiceProvider.GetRequiredService<IServerlessService>();
+await serverless.StartAsync(adapterId, correlationId, settings);
+var result = await serverless.InvokeAsync<ShipmentResult>("CreateShipment", request);
+
+// Resident — a warm instance from the pool
+await using var lease = await adapters.RentAsync(spec);
+var result = await lease.InvokeAsync<ShipmentResult>("CreateShipment", request);
+var logs   = await lease.InvokeAsync<CallLogResult>("GetLogs");
+```
+
+Same command name, same JSON payload, same result type. What changes is underneath: no process
+spawn, no JIT, no storage metadata check, and a gRPC channel that stays open across calls instead
+of being dialled and discarded each time.
+
+**The session id is what makes the second form safe.** Traxis calls a command and then `GetLogs`,
+and expects the command's upstream calls back — so both invocations have to land in the same
+session. `lease.InvokeAsync` attaches the lease's session id; disposing the lease calls
+`ResetAsync(sessionId)`, and the audit trail goes with it. Traxis's process-static `LogStore`
+cannot do this: pool that process and one request's carrier calls appear in the next request's
+audit record.
+
 ## A footgun the classic sample encodes
 
 `Runner.Run(new Handler())` constructs the handler **before** `Runner` has parsed argv, so calling
@@ -157,6 +185,12 @@ a 64 KB chunker must not grow the adapter's working set by 24 MB. Measured in th
 512 MB streamed in 2048 chunks while resident memory held flat at 62–64 MB.
 `AdapterHostingTests` covers the DI container, including a regression for the environment-variable
 trap above.
+
+`CarrierAdapterTests` runs the carrier adapter against a real gRPC service on a loopback port:
+DI-resolved upstream connection, the classic call shape, a rejection returned as a result rather
+than thrown, retries on transient `Unavailable`, and the two that matter for pooling —
+`GetLogs_after_a_command_sees_that_commands_calls` and
+`One_leases_call_log_never_leaks_into_another`.
 
 `ResidentAdapterTests` covers installation from storage, typed command results and
 typed failures, push/ack, and three things worth calling out:

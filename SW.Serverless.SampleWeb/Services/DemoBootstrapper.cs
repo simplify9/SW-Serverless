@@ -25,6 +25,7 @@ namespace SW.Serverless.SampleWeb.Services
         public const string RabbitPublisherId = "rabbit.publisher";
         public const string RabbitConsumerId = "rabbit.consumer";
         public const string LargeFilesId = "sample.largefiles";
+        public const string CarrierId = "sample.carrier";
 
         public static readonly string DropPath =
             Path.Combine(Path.GetTempPath(), "swsl-sampleweb", "drop");
@@ -89,6 +90,15 @@ namespace SW.Serverless.SampleWeb.Services
                         ["Protocol"] = "2", ["Lifecycle"] = "resident", ["MaxInFlight"] = "4"
                     });
 
+                await packager.PublishAsync(CarrierId, "SW.Serverless.Samples.Carrier",
+                    new Dictionary<string, string>
+                    {
+                        ["Protocol"] = "2", ["Lifecycle"] = "resident",
+                        // Poolable: the handler implements IResettable, so a session boundary
+                        // exists and warm instances can safely be checked out per call.
+                        ["Poolable"] = "true", ["PoolSize"] = "3"
+                    });
+
                 await packager.PublishAsync(RabbitConsumerId, "SW.Serverless.Samples.RabbitConsumer",
                     new Dictionary<string, string>
                     {
@@ -136,6 +146,21 @@ namespace SW.Serverless.SampleWeb.Services
                         ["PollSeconds"] = "2",
                         // Slow enough that progress is watchable rather than instantaneous.
                         ["ThrottleMsPerChunk"] = "8"
+                    }
+                }, cancellationToken);
+
+                await adapters.StartExclusiveAsync(new AdapterSpec
+                {
+                    AdapterId = CarrierId,
+                    InstanceKey = "ds-carrier",
+                    StartupValues =
+                    {
+                        ["BaseUrl"] = "http://localhost:5200",
+                        ["Account"] = "SW-ACCT-9931",
+                        ["ApiKey"] = "sample-key-not-a-real-secret",
+                        ["DefaultService"] = "EXPRESS",
+                        ["MaxAttempts"] = "3",
+                        ["TimeoutSeconds"] = "15"
                     }
                 }, cancellationToken);
 

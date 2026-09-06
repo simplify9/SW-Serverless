@@ -7,6 +7,7 @@ using SW.CloudFiles.Extensions;
 using SW.PrimitiveTypes;
 using SW.Serverless;
 using SW.Serverless.Resident;
+using SW.Serverless.SampleWeb.CarrierSim;
 using SW.Serverless.SampleWeb.Components;
 using SW.Serverless.SampleWeb.Services;
 using SW.Serverless.SampleWeb.Telemetry;
@@ -16,6 +17,16 @@ using System.IO;
 using System.Linq;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Two endpoints: the dashboard on 5199, and the simulated carrier's gRPC API on 5200 as h2c.
+// gRPC needs HTTP/2, and Blazor wants HTTP/1.1, so they get a port each rather than fighting.
+builder.Services.Configure<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>(kestrel =>
+{
+    kestrel.ListenLocalhost(5199,
+        o => o.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2);
+    kestrel.ListenLocalhost(5200,
+        o => o.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2);
+});
 
 // ---------------------------------------------------------------- storage and serverless
 
@@ -49,6 +60,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<DemoBootstrapper>(
 builder.Logging.Services.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(
     sp => new AdapterLogCaptureProvider(sp.GetRequiredService<DashboardState>()));
 
+builder.Services.AddGrpc();
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 
 var app = builder.Build();
@@ -57,6 +69,7 @@ if (!app.Environment.IsDevelopment()) app.UseExceptionHandler("/Error", createSc
 app.UseStaticFiles();
 app.UseAntiforgery();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+app.MapGrpcService<CarrierService>();
 
 // ---------------------------------------------------------------- classic lifecycle API
 // Kept as plain endpoints to contrast with the dashboard: one process per call, started and

@@ -63,6 +63,10 @@ code{font:.88em var(--mono);background:var(--muted-bg);padding:1px 5px;border-ra
 .pill.muted{background:var(--muted-bg);color:var(--ink2)}
 button.pill{cursor:pointer}
 
+.two-up{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:16px}
+.two-up .k{font:600 9.5px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;
+  color:var(--dim);display:block;margin-bottom:7px}
+.two-up pre.code{max-width:none;margin:0}
 .progress-wrap{margin-top:15px}
 .progress-head{display:flex;justify-content:space-between;gap:12px;font-size:12px;
   margin-bottom:6px;flex-wrap:wrap;color:var(--ink2)}
