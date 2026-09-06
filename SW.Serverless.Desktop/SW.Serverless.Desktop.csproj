@@ -5,6 +5,9 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>icon.ico</ApplicationIcon>
+    <!-- Lets the project restore and build on macOS and Linux, so it can be opened alongside the
+         rest of the solution. A no-op on Windows, where it is the default. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 
   <ItemGroup>
