@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>SW.Serverless.Samples.RabbitMq</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Same version SW.Bus pins. The adapter talks to the broker directly; nothing about
+         IConsume or IPublish is involved — the provider models RabbitMQ, not SW.Bus. -->
+    <PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
+    <ProjectReference Include="..\SW.Serverless.Sdk\SW.Serverless.Sdk.csproj" />
+  </ItemGroup>
+</Project>

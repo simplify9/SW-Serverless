@@ -1,24 +1,41 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
     <PropertyGroup>
-        <TargetFramework>net8</TargetFramework>
+        <TargetFramework>net8.0</TargetFramework>
         <LangVersion>latest</LangVersion>
+        <Nullable>disable</Nullable>
+        <RootNamespace>SW.Serverless.SampleWeb</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Remove="adapters\**"/>
-        <Content Remove="adapters\**"/>
-        <EmbeddedResource Remove="adapters\**"/>
-        <None Remove="adapters\**"/>
+        <Compile Remove="adapters\**" />
+        <Content Remove="adapters\**" />
+        <None Remove="adapters\**" />
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="SimplyWorks.CloudFiles.AS" Version="8.0.1" />
+        <!-- Local-filesystem ICloudFilesService: the real install-from-storage path, no credentials. -->
+        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="8.1.6" />
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\SW.Serverless\SW.Serverless.csproj"/>
+        <ProjectReference Include="..\SW.Serverless\SW.Serverless.csproj" />
+        <ProjectReference Include="..\SW.Serverless.Samples.CarrierContract\SW.Serverless.Samples.CarrierContract.csproj" />
+        <!-- Build order only. The adapters are packaged and launched as separate processes. -->
+        <ProjectReference Include="..\SW.Serverless.Samples.Ticker\SW.Serverless.Samples.Ticker.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.FolderSource\SW.Serverless.Samples.FolderSource.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.Classic\SW.Serverless.Samples.Classic.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.RabbitPublisher\SW.Serverless.Samples.RabbitPublisher.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.RabbitConsumer\SW.Serverless.Samples.RabbitConsumer.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.LargeFiles\SW.Serverless.Samples.LargeFiles.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.Carrier\SW.Serverless.Samples.Carrier.csproj"
+                          ReferenceOutputAssembly="false" />
     </ItemGroup>
-
 
 </Project>

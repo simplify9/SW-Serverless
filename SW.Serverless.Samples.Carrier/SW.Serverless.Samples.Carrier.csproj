@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>SW.Serverless.Samples.Carrier</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Grpc.Net.ClientFactory" Version="2.66.0" />
+    <ProjectReference Include="..\SW.Serverless.Sdk\SW.Serverless.Sdk.csproj" />
+    <ProjectReference Include="..\SW.Serverless.Samples.CarrierContract\SW.Serverless.Samples.CarrierContract.csproj" />
+  </ItemGroup>
+</Project>

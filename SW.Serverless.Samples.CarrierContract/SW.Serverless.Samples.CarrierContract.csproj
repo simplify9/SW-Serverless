@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>SW.Serverless.Samples.CarrierContract</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.28.3" />
+    <PackageReference Include="Grpc.Core.Api" Version="2.66.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.66.0" PrivateAssets="All" />
+  </ItemGroup>
+  <ItemGroup>
+    <Protobuf Include="Protos\carrier.proto" GrpcServices="Both" />
+  </ItemGroup>
+</Project>

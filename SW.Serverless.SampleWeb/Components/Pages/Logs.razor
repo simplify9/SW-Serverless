@@ -1,0 +1,100 @@
+@page "/logs"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject DashboardState State
+
+<h1>Logs &amp; metrics</h1>
+<p class="lede">
+    Adapter logs arrive as structured frames and are written through the host's own
+    <code>ILogger</code> under <code>serverless.adapters.{id}</code> — so they already land wherever
+    the host's logs land. Metrics are republished on <code>System.Diagnostics.Metrics</code>; this
+    page is one more <code>MeterListener</code>, not a special case.
+</p>
+
+<section class="card">
+    <h2>Metrics</h2>
+    <div class="tw">
+        <table>
+            <thead><tr><th>Meter</th><th>Adapter</th><th class="num">Value</th><th>Last</th></tr></thead>
+            <tbody>
+                @foreach (var m in metrics)
+                {
+                    <tr>
+                        <td class="mono">@m.Name</td>
+                        <td>@m.AdapterId</td>
+                        <td class="num">@m.Value.ToString("0.##")</td>
+                        <td class="dim">@m.LastOn.ToString("HH:mm:ss")</td>
+                    </tr>
+                }
+                @if (metrics.Count == 0)
+                {
+                    <tr><td colspan="4" class="dim">No measurements yet.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="card">
+    <header>
+        <h2>Adapter logs</h2>
+        <div class="badges">
+            @foreach (var level in new[] { "All", "Debug", "Information", "Warning", "Error" })
+            {
+                <button class="pill @(filter == level ? "ok" : "muted")" @onclick="() => filter = level">@level</button>
+            }
+        </div>
+    </header>
+    <div class="tw">
+        <table>
+            <thead><tr><th>Time</th><th>Adapter</th><th>Level</th><th>Message</th></tr></thead>
+            <tbody>
+                @foreach (var l in Filtered())
+                {
+                    <tr>
+                        <td class="num">@l.On.ToString("HH:mm:ss.fff")</td>
+                        <td>@l.AdapterId</td>
+                        <td><span class="pill @LevelClass(l.Level)">@l.Level</span></td>
+                        <td class="mono">@l.Message @(l.Exception is null ? "" : "— " + l.Exception)</td>
+                    </tr>
+                }
+                @if (!Filtered().Any())
+                {
+                    <tr><td colspan="4" class="dim">Nothing at this level. Try "Toggle debug logs" on the Adapters page.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@code {
+    IReadOnlyList<LogRow> logs = Array.Empty<LogRow>();
+    IReadOnlyList<MetricRow> metrics = Array.Empty<MetricRow>();
+    string filter = "All";
+    Timer timer;
+
+    protected override void OnInitialized()
+    {
+        Refresh();
+        timer = new Timer(_ => InvokeAsync(() => { Refresh(); StateHasChanged(); }), null, 1000, 1000);
+    }
+
+    void Refresh()
+    {
+        logs = State.Logs.Snapshot(200);
+        metrics = State.Metrics();
+    }
+
+    IEnumerable<LogRow> Filtered() =>
+        filter == "All" ? logs : logs.Where(l => l.Level == filter);
+
+    static string LevelClass(string level) => level switch
+    {
+        "Error" or "Critical" => "bad",
+        "Warning" => "warn",
+        "Debug" or "Trace" => "muted",
+        _ => "ok"
+    };
+
+    public void Dispose() => timer?.Dispose();
+}

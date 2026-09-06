@@ -1,0 +1,353 @@
+@page "/"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IResidentAdapterHost Host
+@inject DashboardState State
+@inject DemoBootstrapper Bootstrapper
+
+<h1>Adapters</h1>
+<p class="lede">
+    Every figure below comes from one of two independent sources. <strong>Host-observed</strong>
+    (memory, CPU, threads, restarts) needs no cooperation from the adapter, so it still works when
+    one is wedged. <strong>Adapter-reported</strong> (state, in-flight, provider detail) arrives on
+    the heartbeat.
+</p>
+
+@if (Bootstrapper.LastError is not null)
+{
+    <div class="banner bad">
+        <strong>Startup failed:</strong> @Bootstrapper.LastError
+        <div>Build the solution first — the sample packages adapters from their build output.</div>
+    </div>
+}
+
+<div class="tiles">
+    <div class="tile"><span class="k">Instances</span><span class="v">@health.Count</span></div>
+    <div class="tile"><span class="k">Events accepted</span><span class="v">@State.Accepted</span></div>
+    <div class="tile"><span class="k">Rejected</span><span class="v @(State.Rejected > 0 ? "warn" : "")">@State.Rejected</span></div>
+    <div class="tile"><span class="k">Duplicates caught</span><span class="v @(State.Duplicates > 0 ? "warn" : "")">@State.Duplicates</span></div>
+    <div class="tile">
+        <span class="k">Events / second</span>
+        <span class="v">@State.RatePerSecond.ToString("0.0")</span>
+        <Spark Values="State.RateHistogram()" />
+    </div>
+    <div class="tile"><span class="k">Node memory</span><span class="v">@(health.Sum(h => h.WorkingSetBytes) / 1024 / 1024) MB</span></div>
+</div>
+
+@if (Bootstrapper.RabbitError is not null)
+{
+    <div class="banner warn">
+        <strong>RabbitMQ samples not running.</strong> @Bootstrapper.RabbitError
+        <div>
+            Start a broker and restart:
+            <code>docker run -d --rm -p 5672:5672 -p 15672:15672 rabbitmq:3.13-management</code>
+        </div>
+        <div>Everything else on this page is unaffected — one data source being down is not a node outage.</div>
+    </div>
+}
+
+@foreach (var h in health.OrderBy(h => h.AdapterId))
+{
+    <section class="card">
+        <header>
+            <div>
+                <h2>@h.AdapterId <span class="key">@h.InstanceKey</span></h2>
+                <div class="sub">
+                    pid @(h.ProcessId?.ToString() ?? "—") · up @Format(h.Uptime)
+                    @if (h.SdkVersion is not null)
+                    {
+                        <text> · SDK @h.SdkVersion · protocol @h.ProtocolVersion</text>
+                    }
+                </div>
+            </div>
+            <div class="badges">
+                <span class="pill @StateClass(h)">@h.State</span>
+                <span class="pill @(h.Connected ? "ok" : "bad")">@(h.Connected ? "connected" : "disconnected")</span>
+                @if (h.ReportedState is not null && !h.ReportedState.Equals(h.State.ToString(), StringComparison.OrdinalIgnoreCase)
+                     && !(h.Connected && h.ReportedState == "Connected"))
+                {
+                    <span class="pill muted">@h.ReportedState</span>
+                }
+                @if (h.Quarantined)
+                {
+                    <span class="pill bad">quarantined</span>
+                }
+                @foreach (var c in h.Capabilities.Where(c => !c.StartsWith("command:")))
+                {
+                    <span class="pill muted">@c</span>
+                }
+            </div>
+        </header>
+
+        <div class="grid">
+            <div><span class="k">Memory</span><span class="v">@(h.WorkingSetBytes / 1024 / 1024) MB</span></div>
+            <div><span class="k">CPU</span><span class="v">@h.CpuPercent.ToString("0.0")%</span></div>
+            <div><span class="k">Threads</span><span class="v">@h.ThreadCount</span></div>
+            <div><span class="k">Restarts</span><span class="v @(h.RestartCount > 0 ? "warn" : "")">@h.RestartCount</span></div>
+            <div><span class="k">Missed beats</span><span class="v @(h.MissedHeartbeats > 0 ? "warn" : "")">@h.MissedHeartbeats</span></div>
+            <div><span class="k">In flight</span><span class="v">@h.InFlight</span></div>
+            <div><span class="k">Last heartbeat</span><span class="v">@Ago(h.LastHeartbeatOn)</span></div>
+            <div><span class="k">Last message</span><span class="v">@Ago(h.LastMessageOn)</span></div>
+        </div>
+
+        @if (h.LastError is not null)
+        {
+            <div class="banner bad">Last error: @h.LastError</div>
+        }
+
+        @if (h.Details.TryGetValue("percent", out var percent) && h.Details.ContainsKey("currentFile"))
+        {
+            <div class="progress-wrap">
+                <div class="progress-head">
+                    <span class="mono">@h.Details["currentFile"]</span>
+                    <span class="num">
+                        @Mb(h.Details, "bytesRead") / @Mb(h.Details, "totalBytes") MB
+                        · @Detail(h, "throughputMbPerSec", "0") MB/s
+                        @if (h.Details.TryGetValue("etaSeconds", out var eta))
+                        {
+                            <text> · @eta s left</text>
+                        }
+                    </span>
+                </div>
+                <div class="progress"><div class="progress-fill" style="width:@(percent)%"></div></div>
+                <div class="progress-foot dim">
+                    adapter's own working set <b>@Detail(h, "selfWorkingSetMb", "?") MB</b>
+                    — flat regardless of file size, because it streams in
+                    @Detail(h, "chunkSizeKb", "?") KB chunks rather than buffering
+                </div>
+            </div>
+        }
+
+        @if (h.Details.Count > 0)
+        {
+            <div class="detail-row">
+                @foreach (var kv in h.Details.OrderBy(d => d.Key))
+                {
+                    <span class="chip"><b>@kv.Key</b> @kv.Value</span>
+                }
+            </div>
+        }
+
+        <div class="cmd-head">
+            <span class="k">Commands the adapter advertised</span>
+            <span class="dim">discovered from its Hello frame, not hardcoded here</span>
+        </div>
+        <div class="actions">
+            @if (h.Commands.Count == 0)
+            {
+                <span class="dim">This adapter advertised no commands.</span>
+            }
+            @foreach (var cmd in h.Commands)
+            {
+                <button class="@(Destructive(cmd) ? "danger" : null)"
+                        @onclick="() => Invoke(h, cmd, ArgFor(h, cmd))">@cmd</button>
+            }
+        </div>
+
+        <div class="actions">
+            <input value="@ArgOf(h)" @oninput="e => SetArg(h, e.Value?.ToString())"
+                   placeholder="argument for the next command (JSON, or a bare number/string)" class="wide" />
+            @if (h.AdapterId == DemoBootstrapper.FolderSourceId)
+            {
+                <button @onclick="DropFile">Drop a file into the inbox</button>
+            }
+            @if (h.AdapterId == DemoBootstrapper.LargeFilesId)
+            {
+                <button @onclick='() => Invoke(h, "GenerateTestFile", "64")'>Generate 64 MB</button>
+                <button @onclick='() => Invoke(h, "GenerateTestFile", "512")'>Generate 512 MB</button>
+            }
+        </div>
+
+        <div class="actions">
+            <button class="danger" @onclick="() => Kill(h)">Kill process</button>
+            <button @onclick="() => SetLevel(h)">@(DebugOn(h) ? "Debug logs on" : "Toggle debug logs")</button>
+            <button @onclick="() => Drain(h)">Ask to drain</button>
+        </div>
+
+        @if (h.StartupValues is { Count: > 0 })
+        {
+            <details>
+                <summary>Startup values — @h.StartupValues.Count sent over the stream, never on argv</summary>
+                <div class="detail-row">
+                    @foreach (var kv in h.StartupValues.OrderBy(v => v.Key))
+                    {
+                        <span class="chip"><b>@kv.Key</b> @Mask(kv.Key, kv.Value)</span>
+                    }
+                </div>
+            </details>
+        }
+
+        @if (results.TryGetValue(Id(h), out var result))
+        {
+            <pre class="result @(result.StartsWith("ERROR") ? "bad" : "")">@result</pre>
+        }
+
+        <details>
+            <summary>Process output — last @h.Diagnostics.Count lines (crash forensics)</summary>
+            <pre class="diag">@(h.Diagnostics.Count == 0 ? "(nothing on stderr — a healthy adapter logs over the stream, not the console)" : string.Join("\n", h.Diagnostics.Take(30)))</pre>
+        </details>
+    </section>
+}
+
+<section class="card">
+    <h2>Failure injection</h2>
+    <p class="sub">
+        Rejecting an event proves the ack ordering: the folder adapter leaves the file in place
+        instead of archiving it, so it is redelivered — and the dedupe key means the second
+        delivery is recognised rather than double-persisted.
+    </p>
+    <div class="actions">
+        <button @onclick="() => State.RejectNext = 3">Reject the next 3 events</button>
+        <button @onclick="() => State.Reset()">Reset counters</button>
+    </div>
+    @if (State.RejectNext > 0)
+    {
+        <div class="banner warn">Rejecting the next @State.RejectNext events.</div>
+    }
+</section>
+
+@code {
+    IReadOnlyCollection<InstanceHealth> health = Array.Empty<InstanceHealth>();
+    readonly Dictionary<string, string> results = new();
+    Timer timer;
+
+    protected override void OnInitialized()
+    {
+        Refresh();
+        timer = new Timer(_ => InvokeAsync(() => { Refresh(); StateHasChanged(); }), null, 1000, 1000);
+    }
+
+    void Refresh() => health = Host.Describe();
+
+    static string Id(InstanceHealth h) => $"{h.AdapterId}/{h.InstanceKey}";
+
+    readonly Dictionary<string, string> args = new();
+    readonly HashSet<string> debugOn = new();
+
+    static bool Destructive(string command) =>
+        command is "Explode" or "PurgeQueue" or "Fail" or "PublishUnroutable";
+
+    string ArgOf(InstanceHealth h) => args.TryGetValue(Id(h), out var v) ? v : "";
+    void SetArg(InstanceHealth h, string value) => args[Id(h)] = value;
+    bool DebugOn(InstanceHealth h) => debugOn.Contains(Id(h));
+
+    /// <summary>Use whatever is typed, or a sensible default so every button does something.</summary>
+    string ArgFor(InstanceHealth h, string command)
+    {
+        var typed = ArgOf(h);
+        if (!string.IsNullOrWhiteSpace(typed)) return typed;
+
+        return command switch
+        {
+            "SetInterval" => h.AdapterId == DemoBootstrapper.RabbitPublisherId ? "50" : "2",
+            "SetPrefetch" => "8",
+            "GenerateTestFile" => "64",
+            "SetChunkSize" => "512",
+            "Sleep" => "3",
+            "Echo" => "hello from the dashboard",
+            "PublishOne" => "{\"hello\":\"from the dashboard\"}",
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Startup values carry credentials. The adapter declares which are private via
+    /// Runner.Expect; this masks by name as a second line of defence.
+    /// </summary>
+    static string Mask(string key, string value)
+    {
+        if (string.IsNullOrEmpty(value)) return "";
+        // A bare "key" is too broad — it masks RoutingKey, PartitionKey and DedupeKey, which are
+        // topology, not secrets. Match the unambiguous fragments only.
+        var secret = new[]
+            {
+                "password", "pwd", "secret", "token", "credential",
+                "apikey", "accesskey", "privatekey", "connectionstring", "sas"
+            }
+            .Any(f => key.Contains(f, StringComparison.OrdinalIgnoreCase));
+        return secret ? new string('*', Math.Min(8, value.Length)) : value;
+    }
+
+    async Task Drain(InstanceHealth h)
+    {
+        var instance = Host.Get(h.AdapterId, h.InstanceKey);
+        if (instance is null) return;
+        await instance.SetLogLevelAsync(Microsoft.Extensions.Logging.LogLevel.Information);
+        results[Id(h)] = "Drain requested via the supervisor's soft path — the adapter stops "
+                       + "fetching, finishes what is in flight, then exits. A hard kill cannot do that.";
+    }
+
+    async Task Invoke(InstanceHealth h, string command, string payload = null)
+    {
+        var instance = Host.Get(h.AdapterId, h.InstanceKey);
+        if (instance is null) return;
+        try
+        {
+            results[Id(h)] = await instance.InvokeAsync<string>(command, payload, timeoutSeconds: 15)
+                             ?? "(no result)";
+        }
+        catch (AdapterInvocationException ex)
+        {
+            // A failing command comes back typed, not as a hang and not as the next caller's result.
+            results[Id(h)] = $"ERROR  {ex.AdapterExceptionType}: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            results[Id(h)] = $"ERROR  {ex.Message}";
+        }
+    }
+
+    void Kill(InstanceHealth h)
+    {
+        var instance = Host.Get(h.AdapterId, h.InstanceKey);
+        try { instance?.Process?.Kill(entireProcessTree: true); } catch { }
+        results[Id(h)] = "Process killed. The supervisor restarts it with exponential backoff — "
+                       + "watch the restart count, and the quarantine after repeated crashes.";
+    }
+
+    async Task SetLevel(InstanceHealth h)
+    {
+        var instance = Host.Get(h.AdapterId, h.InstanceKey);
+        if (instance is null) return;
+        var on = !debugOn.Contains(Id(h));
+        if (on) debugOn.Add(Id(h)); else debugOn.Remove(Id(h));
+
+        await instance.SetLogLevelAsync(on
+            ? Microsoft.Extensions.Logging.LogLevel.Debug
+            : Microsoft.Extensions.Logging.LogLevel.Information);
+
+        results[Id(h)] = $"Log level set to {(on ? "Debug" : "Information")} at runtime, for this instance only. "
+                       + "See the Logs page.";
+    }
+
+    async Task DropFile()
+    {
+        var path = Path.Combine(DemoBootstrapper.InboxPath, $"web-{DateTime.UtcNow:HHmmssfff}.json");
+        await File.WriteAllTextAsync(path, $"{{\"droppedAt\":\"{DateTimeOffset.UtcNow:O}\"}}");
+    }
+
+    static string Detail(InstanceHealth h, string key, string fallback) =>
+        h.Details.TryGetValue(key, out var value) ? value : fallback;
+
+    static string Mb(IDictionary<string, string> details, string key) =>
+        details.TryGetValue(key, out var raw) && long.TryParse(raw, out var bytes)
+            ? (bytes / 1024d / 1024d).ToString("0.0")
+            : "?";
+
+    static string Format(TimeSpan t) =>
+        t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes}m" :
+        t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes}m {t.Seconds}s" : $"{(int)t.TotalSeconds}s";
+
+    static string Ago(DateTimeOffset? on) =>
+        on is null ? "never" : Format(DateTimeOffset.UtcNow - on.Value) + " ago";
+
+    static string StateClass(InstanceHealth h) => h.State switch
+    {
+        InstanceState.Ready => "ok",
+        InstanceState.Quarantined => "bad",
+        InstanceState.Stopped => "bad",
+        _ => "warn"
+    };
+
+    public void Dispose() => timer?.Dispose();
+}

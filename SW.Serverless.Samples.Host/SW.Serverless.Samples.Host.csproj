@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>SW.Serverless.Samples.Host</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SW.Serverless\SW.Serverless.csproj" />
+    <!-- Build order only; the adapters are launched as separate processes, not linked. -->
+    <ProjectReference Include="..\SW.Serverless.Samples.Ticker\SW.Serverless.Samples.Ticker.csproj"
+                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\SW.Serverless.Samples.FolderSource\SW.Serverless.Samples.FolderSource.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>
