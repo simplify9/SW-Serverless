@@ -99,47 +99,27 @@ namespace SW.Serverless.Installer.Shared
             }
         }
 
-        private static async Task<CloudFilesService> GetAzureStorageConfig(CloudFilesOptions cloudFilesOptions)
-        {
-            var blobContainerClient = new BlobServiceClient(
-                new Uri(cloudFilesOptions.ServiceUrl),
-                new StorageSharedKeyCredential(cloudFilesOptions.AccessKeyId,
-                    cloudFilesOptions.SecretAccessKey)).GetBlobContainerClient(cloudFilesOptions.BucketName);
 
-            return await blobContainerClient.ExistsAsync()
-                ? new CloudFilesService(blobContainerClient)
-                : new CloudFilesService(
-                    await new BlobServiceClient(new Uri(cloudFilesOptions.ServiceUrl),
-                            new StorageSharedKeyCredential(cloudFilesOptions.AccessKeyId,
-                                cloudFilesOptions.SecretAccessKey))
-                        .CreateBlobContainerAsync(cloudFilesOptions.BucketName));
-        }
 
-        private static Task<CloudFiles.S3.CloudFilesService> GetS3Config(CloudFilesOptions cloudFilesOptions)
-        {
-            return Task.FromResult(new CloudFiles.S3.CloudFilesService(cloudFilesOptions));
-        }
 
-        private static Task<CloudFiles.OC.CloudFilesService> GetOracleCloudConfigConfig(
-            OracleCloudFilesOptions options)
+        /// <summary>
+        /// What every uploaded adapter carries. Kind and Lifecycle are new, and both are written
+        /// even when empty so a host can tell "this adapter declared nothing" from "this adapter
+        /// predates the field" — the second still needs the old naming convention to classify it.
+        /// </summary>
+        private static Dictionary<string, string> BuildMetadata(
+            string entryAssembly, AdapterDescription description) => new()
         {
-            var directory = Path.GetDirectoryName(Assembly.GetEntryAssembly()?.Location)!;
-            var pemPath = Path.Combine(directory, $"{Guid.NewGuid():N}.pem");
-            File.WriteAllText(pemPath, options.RSAKey);
-            var configPAth = Path.Combine(directory, $"{Guid.NewGuid():N}.config");
-            File.WriteAllText(configPAth, @$"[DEFAULT]
-user={options.UserId}
-fingerprint={options.FingerPrint}
-tenancy={options.TenantId}
-region={options.Region}
-key_file={pemPath}");
-            options.ConfigPath = configPAth;
-            return Task.FromResult(new CloudFiles.OC.CloudFilesService(options, null));
-        }
+            { "EntryAssembly", entryAssembly },
+            { "Lang", "dotnet" },
+            { "Timestamp", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") },
+            { "Lifecycle", description?.Lifecycle ?? AdapterDescription.ClassicLifecycle },
+            { "Kind", description?.Kind ?? "" },
+        };
 
         private static async Task UploadVersioned(ICloudFilesService cloudService, Stream zipFileStream,
             string adapterId,
-            string entryAssembly, string version)
+            string entryAssembly, string version, AdapterDescription description)
         {
             var dir = $"adapters/{adapterId}".ToLower();
             var list = (await cloudService.ListAsync(dir)).ToList();
@@ -150,17 +130,12 @@ key_file={pemPath}");
             {
                 ContentType = "application/zip",
                 Key = path,
-                Metadata = new Dictionary<string, string>
-                {
-                    { "EntryAssembly", entryAssembly },
-                    { "Lang", "dotnet" },
-                    { "Timestamp", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }
-                }
+                Metadata = BuildMetadata(entryAssembly, description)
             });
         }
 
         private static async Task UploadLegacy(ICloudFilesService cloudService, Stream zipFileStream, string adapterId,
-            string entryAssembly)
+            string entryAssembly, AdapterDescription description)
         {
             var path = $"adapters/{adapterId}".ToLower();
             Console.WriteLine($"Uploading to {path}");
@@ -168,56 +143,39 @@ key_file={pemPath}");
             {
                 ContentType = "application/zip",
                 Key = path,
-                Metadata = new Dictionary<string, string>
-                {
-                    { "EntryAssembly", entryAssembly },
-                    { "Lang", "dotnet" },
-                    { "Timestamp", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }
-                }
+                Metadata = BuildMetadata(entryAssembly, description)
             });
         }
 
         public async Task<bool> PushToCloud(
             string zipFilePath,
             string entryAssembly,
-            ServerlessUploadOptions options)
+            ServerlessUploadOptions options,
+            AdapterDescription description = null)
         {
             try
             {
                 Console.WriteLine("Starting...");
-                var cloudFilesOptions = new OracleCloudFilesOptions
-                {
-                    AccessKeyId = options.AccessKeyId,
-                    SecretAccessKey = options.SecretAccessKey,
-                    ServiceUrl = options.ServiceUrl,
-                    BucketName = options.BucketName,
-                    Region = options.Region,
-                    FingerPrint = options.FingerPrint,
-                    TenantId = options.TenantId,
-                    UserId = options.UserId,
-                    RSAKey = options.RSAKey,
-                    NamespaceName = options.NamespaceName,
-                };
-                ICloudFilesService cloudService = options.Provider?.ToLower() switch
-                {
-                    "as" => await GetAzureStorageConfig(cloudFilesOptions),
-                    "s3" => await GetS3Config(cloudFilesOptions),
-                    "oc" => await GetOracleCloudConfigConfig(cloudFilesOptions),
-                    _ => await GetS3Config(cloudFilesOptions),
-                };
+                var cloudService = CloudFilesFactory.Create(options);
                 Console.WriteLine("Reading file...");
 
                 await using var zipFileStream = File.OpenRead(zipFilePath);
                 Console.WriteLine("Pushing to cloud...");
 
+                description ??= new AdapterDescription();
+                Console.WriteLine(
+                    $"Lifecycle: {description.Lifecycle}"
+                    + (string.IsNullOrEmpty(description.Kind) ? "" : $", kind: {description.Kind}"));
+
                 if (string.IsNullOrWhiteSpace(options.Version))
                 {
-                    await UploadLegacy(cloudService, zipFileStream, options.AdapterId, entryAssembly);
+                    await UploadLegacy(cloudService, zipFileStream, options.AdapterId, entryAssembly,
+                        description);
                 }
                 else
                 {
                     await UploadVersioned(cloudService, zipFileStream, options.AdapterId, entryAssembly,
-                        options.Version);
+                        options.Version, description);
                 }
 
                 Console.WriteLine("Pushing to cloud succeeded.");

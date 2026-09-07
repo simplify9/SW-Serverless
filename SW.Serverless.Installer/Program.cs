@@ -39,6 +39,7 @@ namespace SW.Serverless.Installer
                     Version = options.Version,
                     Provider = options.Provider,
                     AdapterId = options.AdapterId,
+                    Kind = options.Kind,
                 };
 
 
@@ -87,7 +88,18 @@ namespace SW.Serverless.Installer
                 var projectFileName = Path.GetFileName(opts.ProjectPath);
                 var entryAssembly = $"{projectFileName!.Remove(projectFileName.LastIndexOf('.'))}.dll";
 
-                if (!await installer.PushToCloud(zipFileName, entryAssembly, await GetServerlessUploadOptions(opts)))
+                // Read from the published assembly rather than asked for: the lifecycle is a fact
+                // about the code, and a host that has to be told it separately will eventually be
+                // told wrong — which is how a resident adapter ends up offered somewhere only a
+                // classic one can run.
+                var description = AdapterDescriber.Describe(tempPath, entryAssembly);
+
+                // An explicit --kind wins, for an adapter whose author has not declared one.
+                if (!string.IsNullOrWhiteSpace(opts.Kind)) description.Kind = opts.Kind.Trim();
+
+                var uploadOptions = await GetServerlessUploadOptions(opts);
+
+                if (!await installer.PushToCloud(zipFileName, entryAssembly, uploadOptions, description))
                     return;
 
                 if (!installer.Cleanup(tempPath)) return;

@@ -9,9 +9,16 @@
 
   <ItemGroup>
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
-    <PackageReference Include="SimplyWorks.CloudFiles.AS" Version="5.0.29" />
-    <PackageReference Include="SimplyWorks.CloudFiles.S3" Version="8.0.1" />
-    <PackageReference Include="SimplyWorks.CloudFiles.OC" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
+    <PackageReference Include="SimplyWorks.CloudFiles.AS" Version="8.1.12" />
+    <PackageReference Include="SimplyWorks.CloudFiles.AS.Extensions" Version="8.1.12" />
+    <PackageReference Include="SimplyWorks.CloudFiles.GC.Extensions" Version="8.1.12" />
+    <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="8.1.12" />
+    <PackageReference Include="SimplyWorks.CloudFiles.OC.Extensions" Version="8.1.12" />
+    <PackageReference Include="SimplyWorks.CloudFiles.S3" Version="8.1.12" />
+    <PackageReference Include="SimplyWorks.CloudFiles.OC" Version="8.1.12" />
+    <PackageReference Include="SimplyWorks.CloudFiles.S3.Extensions" Version="8.1.12" />
+    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.11" />
 
   </ItemGroup>
 

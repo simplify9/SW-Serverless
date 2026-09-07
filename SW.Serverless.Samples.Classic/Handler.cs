@@ -12,6 +12,8 @@ namespace SW.Serverless.Samples.Classic
     /// adapters already use. Commands are public Task / Task&lt;T&gt; methods discovered by name;
     /// configuration comes from startup values; logging goes through AdapterLogger.
     /// </summary>
+    [AdapterKind("handler")]
+    [AdapterKind("mapper")]
     public class Handler
     {
         /// <summary>
