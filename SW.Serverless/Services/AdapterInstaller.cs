@@ -43,24 +43,49 @@ namespace SW.Serverless
                 if (!Directory.Exists(directory))
                 {
                     Directory.CreateDirectory(directory);
+
+                    // ZipArchive needs a SEEKABLE stream to read the central directory. The
+                    // cloud-storage read stream is not seekable, so handing it directly to
+                    // ZipArchive silently makes .NET buffer the entire archive into one
+                    // in-memory MemoryStream first - for a large adapter (DevExpress-sized,
+                    // several hundred MB uncompressed) that one-time spike is big enough to
+                    // OOM the whole host process on a memory-constrained container, well
+                    // before the child adapter process itself even starts. Downloading to a
+                    // temp FILE first keeps memory use to one bounded copy-buffer regardless
+                    // of archive size, and a FileStream is seekable so ZipArchive reads
+                    // straight off disk.
+                    var tempZipPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.zip");
                     try
                     {
-                        using var stream = await cloudFilesService.OpenReadAsync(
-                            $"{options.AdapterRemotePath}/{adapterId}".ToLower());
-                        using var archive = new ZipArchive(stream);
-
-                        foreach (var entry in archive.Entries)
+                        using (var remoteStream = await cloudFilesService.OpenReadAsync(
+                                   $"{options.AdapterRemotePath}/{adapterId}".ToLower()))
+                        using (var tempFileStream = new FileStream(tempZipPath, FileMode.Create,
+                                   FileAccess.Write, FileShare.None))
                         {
-                            if (string.IsNullOrEmpty(entry.Name)) continue;
-                            var path = $"{directory}/{entry.FullName.Replace("\\", "/")}";
-                            Directory.CreateDirectory(Path.GetDirectoryName(path));
-                            entry.ExtractToFile(path, overwrite: true);
+                            await remoteStream.CopyToAsync(tempFileStream);
+                        }
+
+                        using (var archiveStream = new FileStream(tempZipPath, FileMode.Open,
+                                   FileAccess.Read, FileShare.Read))
+                        using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read))
+                        {
+                            foreach (var entry in archive.Entries)
+                            {
+                                if (string.IsNullOrEmpty(entry.Name)) continue;
+                                var path = $"{directory}/{entry.FullName.Replace("\\", "/")}";
+                                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                                entry.ExtractToFile(path, overwrite: true);
+                            }
                         }
                     }
                     catch (Exception)
                     {
                         Directory.Delete(directory, true);
                         throw;
+                    }
+                    finally
+                    {
+                        try { File.Delete(tempZipPath); } catch { /* best-effort cleanup */ }
                     }
                 }
             }
