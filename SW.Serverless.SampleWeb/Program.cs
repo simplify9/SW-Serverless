@@ -47,6 +47,12 @@ builder.Services.AddResidentAdapters<DashboardEventSink>(o =>
     o.MaxInFlight = 8;
     o.SoftMemoryLimitBytes = 512L * 1024 * 1024;
     o.CrashLoopThreshold = 4;
+
+    // Demo-sized so the effect is visible on the Adapters page without waiting minutes: a
+    // pooled carrier instance nobody rents for 20s is retired by the next supervisor sweep, and
+    // the warm set shrinks back down. CarrierWork.razor overrides this per-adapter to 15s to show
+    // the same "IdleTimeoutSeconds" AdapterValues knob a real deployment would use.
+    o.IdleTimeout = TimeSpan.FromSeconds(20);
 });
 
 // ---------------------------------------------------------------- observability

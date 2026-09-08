@@ -27,6 +27,14 @@ namespace SW.Serverless.Resident
         public bool DrainRequested { get; set; }
         public DateTimeOffset? LastHeartbeatOn { get; set; }
 
+        /// <summary>
+        /// When a pooled instance was last checked back in. Null while checked out, for an
+        /// exclusive instance (never pooled), or right after spawning. Once set, it ages until
+        /// the pool's idle-eviction sweep retires the instance — see
+        /// <see cref="ResidentOptions.IdleTimeout"/>.
+        /// </summary>
+        public DateTimeOffset? IdleSince { get; set; }
+
         // Adapter-reported
         public bool Connected { get; set; }
         public string ReportedState { get; set; }

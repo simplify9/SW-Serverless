@@ -46,5 +46,15 @@ namespace SW.Serverless.Resident
 
         /// <summary>Workstation GC by default: server GC costs a heap and a thread per core.</summary>
         public bool UseWorkstationGc { get; set; } = true;
+
+        /// <summary>
+        /// How long a pooled resident instance may sit checked-in and unused before the pool
+        /// retires it, letting the warm set shrink back down. Zero (the default) disables idle
+        /// eviction — a pool trading memory for a guaranteed-warm next call is often exactly what
+        /// pooling is for. Applies only to pooled ("Poolable") adapters (<see cref="AdapterPool"/>);
+        /// exclusive instances (broker connections, etc.) are never evicted for idling. An adapter
+        /// can override this via the "IdleTimeoutSeconds" adapter-metadata value.
+        /// </summary>
+        public TimeSpan IdleTimeout { get; set; } = TimeSpan.Zero;
     }
 }

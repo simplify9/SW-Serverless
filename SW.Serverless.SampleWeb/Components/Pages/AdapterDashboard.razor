@@ -19,7 +19,9 @@
     Every figure below comes from one of two independent sources. <strong>Host-observed</strong>
     (memory, CPU, threads, restarts) needs no cooperation from the adapter, so it still works when
     one is wedged. <strong>Adapter-reported</strong> (state, in-flight, provider detail) arrives on
-    the heartbeat.
+    the heartbeat. A pooled instance also shows <strong>idle for</strong> once nothing has rented
+    it — past its <code>IdleTimeoutSeconds</code>, it simply drops off this list on the next
+    sweep; see <a href="/carrier">the Carrier page</a> for a live example.
 </p>
 
 @if (Bootstrapper.LastError is not null)
@@ -97,6 +99,10 @@
             <div><span class="k">In flight</span><span class="v">@h.InFlight</span></div>
             <div><span class="k">Last heartbeat</span><span class="v">@Ago(h.LastHeartbeatOn)</span></div>
             <div><span class="k">Last message</span><span class="v">@Ago(h.LastMessageOn)</span></div>
+            @if (h.IdleSince is not null)
+            {
+                <div><span class="k">Idle for</span><span class="v warn">@Format(DateTimeOffset.UtcNow - h.IdleSince.Value)</span></div>
+            }
         </div>
 
         @if (h.LastError is not null)

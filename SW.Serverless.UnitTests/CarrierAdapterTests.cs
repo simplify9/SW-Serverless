@@ -31,6 +31,7 @@ namespace SW.Serverless.UnitTests
     public class CarrierAdapterTests
     {
         const string AdapterId = "test.carrier";
+        const string IdleAdapterId = "test.carrier.idle-evict";
 
         static WebApplication carrier;
         static IHost host;
@@ -85,6 +86,18 @@ namespace SW.Serverless.UnitTests
 
             await TestStore.PublishAsync(host.Services.GetRequiredService<ICloudFilesService>(),
                 AdapterId, "SW.Serverless.Samples.Carrier",
+                new Dictionary<string, string>
+                {
+                    ["Protocol"] = "2", ["Lifecycle"] = "resident",
+                    ["Poolable"] = "true", ["PoolSize"] = "2"
+                });
+
+            // A distinct adapter id, never touched by any other test's RentAsync, so its pool is
+            // guaranteed to be created with the idle-eviction settings below — AdapterPool captures
+            // whatever AdapterValues came in on the FIRST RentAsync for an adapter id and every
+            // later caller shares that same pool.
+            await TestStore.PublishAsync(host.Services.GetRequiredService<ICloudFilesService>(),
+                IdleAdapterId, "SW.Serverless.Samples.Carrier",
                 new Dictionary<string, string>
                 {
                     ["Protocol"] = "2", ["Lifecycle"] = "resident",
@@ -299,6 +312,43 @@ namespace SW.Serverless.UnitTests
 
             Assert.IsTrue(pids.Count <= 2,
                 $"four sequential leases used {pids.Count} processes; a pool of 2 should reuse them");
+        }
+
+        /// <summary>
+        /// A pool with an idle timeout must shrink back down once nothing is renting from it,
+        /// instead of holding its peak size — and its warm processes — forever.
+        /// </summary>
+        [TestMethod]
+        public async Task Idle_pooled_instances_are_evicted_after_the_configured_timeout()
+        {
+            var spec = new AdapterSpec
+            {
+                AdapterId = IdleAdapterId,
+                StartupValues =
+                {
+                    ["BaseUrl"] = baseUrl,
+                    ["Account"] = "TEST-ACCT",
+                    ["ApiKey"] = "not-a-real-secret",
+                    ["MaxAttempts"] = "3",
+                    ["RetryDelayMs"] = "50",
+                    ["TimeoutSeconds"] = "10"
+                },
+                AdapterValues = { ["Poolable"] = "true", ["PoolSize"] = "2", ["IdleTimeoutSeconds"] = "1" }
+            };
+
+            int pid;
+            await using (var lease = await adapters.RentAsync(spec))
+            {
+                await lease.InvokeAsync<JObject>("TestConnection");
+                pid = lease.Instance.Process.Id;
+            }
+
+            // The 1s idle timeout plus at least one full supervisor sweep (HeartbeatInterval = 3s
+            // for this host, see ClassInitialize), with slack for scheduling jitter.
+            await Task.Delay(TimeSpan.FromSeconds(6));
+
+            Assert.IsFalse(adapters.Describe().Any(h => h.AdapterId == IdleAdapterId && h.ProcessId == pid),
+                "the idle instance should have been retired by the eviction sweep");
         }
 
         // ------------------------------------------------------------------ upstream
