@@ -51,6 +51,7 @@ namespace SW.Serverless.Sdk.Resident
             });
 
         readonly ConcurrentDictionary<long, TaskCompletionSource<EventAck>> pendingEvents = new();
+        readonly ConcurrentDictionary<long, TaskCompletionSource<StateResult>> pendingState = new();
         readonly CancellationTokenSource stopping = new();
 
         Handshake handshake;
@@ -247,6 +248,11 @@ namespace SW.Serverless.Sdk.Resident
                     case HostFrame.BodyOneofCase.EventAck:
                         if (pendingEvents.TryRemove(frame.Id, out var tcs))
                             tcs.TrySetResult(frame.EventAck);
+                        break;
+
+                    case HostFrame.BodyOneofCase.StateResult:
+                        if (pendingState.TryRemove(frame.Id, out var stateTcs))
+                            stateTcs.TrySetResult(frame.StateResult);
                         break;
 
                     case HostFrame.BodyOneofCase.SetLogLevel:
@@ -530,6 +536,66 @@ namespace SW.Serverless.Sdk.Resident
             finally
             {
                 inFlight?.Release();
+            }
+        }
+
+        public async Task<string> GetStateAsync(string name, CancellationToken cancellationToken = default)
+        {
+            var result = await StateAsync(
+                new StateRequest { Op = StateRequest.Types.Op.Get, Name = Named(name) }, cancellationToken);
+
+            return result.Found ? result.Value : null;
+        }
+
+        public async Task SetStateAsync(string name, string value, CancellationToken cancellationToken = default)
+        {
+            var request = value == null
+                ? new StateRequest { Op = StateRequest.Types.Op.Delete, Name = Named(name) }
+                : new StateRequest { Op = StateRequest.Types.Op.Set, Name = Named(name), Value = value };
+
+            await StateAsync(request, cancellationToken);
+        }
+
+        static string Named(string name) =>
+            string.IsNullOrWhiteSpace(name)
+                ? throw new ArgumentException("A state name is required.", nameof(name))
+                : name;
+
+        /// <summary>
+        /// One state round trip. Deliberately NOT bounded by the in-flight window that guards
+        /// PublishAsync: that window exists to stop an adapter flooding the host with messages it
+        /// must persist, and a receiver saving its cursor after a batch would then be queued behind
+        /// the very events whose progress it is recording.
+        /// </summary>
+        async Task<StateResult> StateAsync(StateRequest request, CancellationToken cancellationToken)
+        {
+            var id = Interlocked.Increment(ref nextId);
+            var tcs = new TaskCompletionSource<StateResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            pendingState[id] = tcs;
+
+            try
+            {
+                Send(new AdapterFrame { Id = id, State = request });
+
+                using (cancellationToken.Register(() => tcs.TrySetCanceled()))
+                using (stopping.Token.Register(() => tcs.TrySetCanceled()))
+                {
+                    var result = await tcs.Task;
+
+                    // Surfaced rather than swallowed: a cursor that silently failed to save is a
+                    // batch that will be replayed, and the adapter is the only thing in a position
+                    // to stop rather than carry on.
+                    if (result.Error != null && !string.IsNullOrEmpty(result.Error.Message))
+                        throw new InvalidOperationException(
+                            $"The host could not {request.Op.ToString().ToLowerInvariant()} state "
+                            + $"'{request.Name}': {result.Error.Message}");
+
+                    return result;
+                }
+            }
+            finally
+            {
+                pendingState.TryRemove(id, out _);
             }
         }
 

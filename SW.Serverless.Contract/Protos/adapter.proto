@@ -26,6 +26,7 @@ message HostFrame {
         Reset reset = 7;
         Shutdown shutdown = 8;
         EventAck event_ack = 9;
+        StateResult state_result = 10;
     }
 }
 
@@ -60,6 +61,13 @@ message Shutdown {
     bool drain = 2;           // true: stop fetching, finish in-flight, then exit
 }
 
+// Answers a StateRequest. Correlated by frame id, exactly as EventAck answers an Event.
+message StateResult {
+    bool found = 1;           // false for a get with nothing stored under that name
+    string value = 2;
+    Error error = 3;
+}
+
 message EventAck {
     bool accepted = 1;
     string reference = 2;     // the host's id for what it persisted, e.g. an Xchange id
@@ -78,6 +86,7 @@ message AdapterFrame {
         LogEntry log = 6;
         Metric metric = 7;
         Pong pong = 8;
+        StateRequest state = 9;
     }
 }
 
@@ -137,6 +146,25 @@ message Event {
     string content_type = 3;
     map<string, string> headers = 4;
     string endpoint = 5;      // which queue / topic / folder this came from
+}
+
+// Small, durable, host-held key/value state belonging to this adapter instance.
+//
+// It exists because an adapter must not be the system of record for its own progress: it is
+// restarted by the supervisor, it may run on a different node next time, and in the pooled shape
+// it is not even the same process twice. A polling receiver's cursor is the motivating case —
+// the equivalent of Airbyte's `state` argument. Deliberately small: this is a bookmark, not a
+// data store.
+message StateRequest {
+    Op op = 1;
+    string name = 2;
+    string value = 3;         // set only; ignored otherwise
+
+    enum Op {
+        GET = 0;
+        SET = 1;
+        DELETE = 2;
+    }
 }
 
 message LogEntry {
