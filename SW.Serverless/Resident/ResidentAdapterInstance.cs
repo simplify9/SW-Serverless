@@ -26,6 +26,7 @@ namespace SW.Serverless.Resident
         readonly ILogger logger;
         readonly ILogger adapterLogger;
         readonly IAdapterEventSink sink;
+        readonly IAdapterStateStore stateStore;
 
         // The correlation fix: every outstanding call is keyed, so a late reply can never
         // resolve an unrelated one the way the single v1 field did (design doc 14.3).
@@ -45,13 +46,15 @@ namespace SW.Serverless.Resident
         CancellationTokenSource linkedCts;
 
         internal ResidentAdapterInstance(string adapterId, string instanceKey, string token,
-            ResidentOptions options, IAdapterEventSink sink, ILoggerFactory loggerFactory)
+            ResidentOptions options, IAdapterEventSink sink, IAdapterStateStore stateStore,
+            ILoggerFactory loggerFactory)
         {
             AdapterId = adapterId;
             InstanceKey = instanceKey;
             Token = token;
             this.options = options;
             this.sink = sink;
+            this.stateStore = stateStore;
             inbound = new SemaphoreSlim(Math.Max(1, options.MaxInFlight));
             logger = loggerFactory.CreateLogger<ResidentAdapterInstance>();
             adapterLogger = loggerFactory.CreateLogger($"serverless.adapters.{adapterId}".ToLowerInvariant());
@@ -226,6 +229,13 @@ namespace SW.Serverless.Resident
                     }, ct);
                     break;
 
+                case AdapterFrame.BodyOneofCase.State:
+                    // Awaited inline rather than fanned out: state calls are small, ordered per
+                    // adapter by construction, and an adapter that writes a cursor twice in a row
+                    // means the second to be the one that lands.
+                    await HandleStateAsync(frame, ct);
+                    break;
+
                 case AdapterFrame.BodyOneofCase.Log:
                     WriteLog(frame.Log);
                     break;
@@ -264,6 +274,48 @@ namespace SW.Serverless.Resident
                 ack.Error = new Error { Type = "SinkRejected", Message = outcome.Error ?? "" };
 
             Send(new HostFrame { Id = frame.Id, EventAck = ack });
+        }
+
+        async Task HandleStateAsync(AdapterFrame frame, CancellationToken ct)
+        {
+            var request = frame.State;
+            var key = new AdapterStateKey
+            {
+                AdapterId = AdapterId,
+                InstanceKey = InstanceKey,
+                Name = request.Name
+            };
+
+            var result = new StateResult();
+            try
+            {
+                switch (request.Op)
+                {
+                    case StateRequest.Types.Op.Get:
+                        var value = await stateStore.GetAsync(key, ct);
+                        result.Found = value != null;
+                        result.Value = value ?? "";
+                        break;
+
+                    case StateRequest.Types.Op.Set:
+                        await stateStore.SetAsync(key, request.Value ?? "", ct);
+                        result.Found = true;
+                        break;
+
+                    case StateRequest.Types.Op.Delete:
+                        await stateStore.SetAsync(key, null, ct);
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Reported back rather than logged and dropped. An adapter that believes it saved
+                // its cursor and did not will skip whatever it read next time.
+                logger.LogError(ex, "State store threw for {Key} ({Op}).", key, request.Op);
+                result.Error = new Error { Type = ex.GetType().Name, Message = ex.Message };
+            }
+
+            Send(new HostFrame { Id = frame.Id, StateResult = result });
         }
 
         void WriteLog(LogEntry entry)

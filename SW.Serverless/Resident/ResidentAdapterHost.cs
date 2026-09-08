@@ -11,6 +11,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -20,6 +22,7 @@ namespace SW.Serverless.Resident
     {
         readonly ResidentOptions options;
         readonly IAdapterEventSink sink;
+        readonly IAdapterStateStore stateStore;
         readonly ILoggerFactory loggerFactory;
         readonly ILogger<ResidentAdapterHost> logger;
         readonly ResidentAdapterRegistry registry = new();
@@ -41,10 +44,11 @@ namespace SW.Serverless.Resident
         readonly IResidentAdapterLocator locator;
 
         public ResidentAdapterHost(ResidentOptions options, IAdapterEventSink sink,
-            IResidentAdapterLocator locator, ILoggerFactory loggerFactory)
+            IAdapterStateStore stateStore, IResidentAdapterLocator locator, ILoggerFactory loggerFactory)
         {
             this.options = options;
             this.sink = sink;
+            this.stateStore = stateStore;
             this.locator = locator;
             this.loggerFactory = loggerFactory;
             logger = loggerFactory.CreateLogger<ResidentAdapterHost>();
@@ -182,7 +186,7 @@ namespace SW.Serverless.Resident
                 spec.AdapterId,
                 spec.InstanceKey ?? "default",
                 Guid.NewGuid().ToString("N"),
-                options, sink, loggerFactory)
+                options, sink, stateStore, loggerFactory)
             {
                 StartupValues = new Dictionary<string, string>(
                     spec.StartupValues ?? new Dictionary<string, string>()),
@@ -385,9 +389,36 @@ namespace SW.Serverless.Resident
 
         public Task<IAdapterLease> RentAsync(AdapterSpec spec, CancellationToken cancellationToken = default)
         {
-            var pool = pools.GetOrAdd(spec.AdapterId,
+            // Keyed by the SPEC, not by the adapter id. GetOrAdd captures the spec of whichever
+            // caller created the pool first — including its startup values, which is where the
+            // connection string and the credentials live. Keying on the id alone therefore handed
+            // the second data source a process connected as the first one: every later renter of
+            // that adapter silently ran against the wrong system.
+            var pool = pools.GetOrAdd(PoolKeyOf(spec),
                 _ => new AdapterPool(spec, this, options, loggerFactory.CreateLogger<AdapterPool>()));
             return pool.RentAsync(cancellationToken);
+        }
+
+        /// <summary>
+        /// Which pool a spec belongs in. An explicit <see cref="AdapterSpec.PoolKey"/> wins; otherwise
+        /// it is the adapter id plus a hash of the startup values, so identical configuration shares
+        /// warm processes and differing configuration cannot.
+        ///
+        /// Hashed rather than concatenated because the values are credentials, and this string ends
+        /// up in logs and in pool diagnostics.
+        /// </summary>
+        public static string PoolKeyOf(AdapterSpec spec)
+        {
+            if (!string.IsNullOrWhiteSpace(spec.PoolKey)) return $"{spec.AdapterId}:{spec.PoolKey}";
+            if (spec.StartupValues == null || spec.StartupValues.Count == 0) return spec.AdapterId;
+
+            var canonical = new StringBuilder();
+            foreach (var kv in spec.StartupValues.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+                canonical.Append(kv.Key).Append('\u001f').Append(kv.Value).Append('\u001e');
+
+            using var sha = SHA256.Create();
+            var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(canonical.ToString()));
+            return $"{spec.AdapterId}:{Convert.ToHexString(hash, 0, 8).ToLowerInvariant()}";
         }
 
         internal async Task<ResidentAdapterInstance> SpawnPooledAsync(AdapterSpec spec, string slot,

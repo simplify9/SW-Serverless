@@ -22,6 +22,16 @@ namespace SW.Serverless.Resident
         /// <summary>Executable to launch. Defaults to `dotnet`; set for self-contained or non-.NET adapters.</summary>
         public string Executable { get; set; }
 
+        /// <summary>
+        /// Which warm pool a POOLED rental belongs to. Left null the host derives one from the
+        /// adapter id and a hash of <see cref="StartupValues"/>, so that two configurations of the
+        /// same adapter never share processes. Set it when the caller has a better name for the
+        /// grouping — a data source id, say — than the settings happen to hash to.
+        ///
+        /// Ignored for an exclusive instance, which is keyed by <see cref="InstanceKey"/>.
+        /// </summary>
+        public string PoolKey { get; set; }
+
         /// <summary>Configuration and credentials. Sent over the stream, never on argv.</summary>
         public IDictionary<string, string> StartupValues { get; set; } = new Dictionary<string, string>();
 

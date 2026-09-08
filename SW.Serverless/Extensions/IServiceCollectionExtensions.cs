@@ -38,6 +38,11 @@ namespace SW.Serverless
 
             services.AddSingleton(options);
             services.TryAddSingleton<IAdapterEventSink, TSink>();
+
+            // Replaceable, and a real deployment must replace it: the in-memory store is per
+            // process, so a cursor saved on one node is invisible to the next one to run the
+            // adapter. TryAdd, so a host that registered its own keeps it.
+            services.TryAddSingleton<IAdapterStateStore, InMemoryAdapterStateStore>();
             services.TryAddSingleton<AdapterInstaller>();
             services.TryAddSingleton<IResidentAdapterLocator, DefaultResidentAdapterLocator>();
             services.AddSingleton<ResidentAdapterHost>();
@@ -45,6 +50,20 @@ namespace SW.Serverless
             services.AddHostedService(sp => sp.GetRequiredService<ResidentAdapterHost>());
 
             return services;
+        }
+
+        /// <summary>
+        /// As <see cref="AddResidentAdapters{TSink}"/>, with the host's own durable state store —
+        /// what a polling receiver's cursor is written to. Use this one anywhere state has to
+        /// outlive the process or be visible to another node.
+        /// </summary>
+        public static IServiceCollection AddResidentAdapters<TSink, TStateStore>(
+            this IServiceCollection services, Action<ResidentOptions> configure = null)
+            where TSink : class, IAdapterEventSink
+            where TStateStore : class, IAdapterStateStore
+        {
+            services.TryAddSingleton<IAdapterStateStore, TStateStore>();
+            return services.AddResidentAdapters<TSink>(configure);
         }
     }
 }

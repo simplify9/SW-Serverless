@@ -1557,6 +1557,58 @@ capability behind metadata flags and new APIs, so Gateway can take a NuGet bump 
 behavioural change and adopt features on its own schedule. A breaking protocol change would
 require a coordinated upgrade across ~190 binaries and is effectively off the table.
 
+### 14.9 Host-held adapter state
+
+An adapter must not be the system of record for its own progress, and until now nothing in the
+contract let it avoid being one. The supervisor restarts it, the next instance may come up on a
+different node, and a pooled one is not the same process twice — so a polling receiver that keeps
+its cursor in a field replays from the beginning at the least convenient moment.
+
+So `IAdapterContext` gains two calls, sitting beside `PublishAsync` and answered the same way — an
+adapter-initiated frame, correlated by id, awaited before the adapter carries on:
+
+```csharp
+Task<string> GetStateAsync(string name, CancellationToken ct = default);
+Task SetStateAsync(string name, string value, CancellationToken ct = default);  // null deletes
+```
+
+On the wire that is `StateRequest` (get / set / delete) answered by `StateResult`. On the host side
+it is `IAdapterStateStore`, the counterpart of `IAdapterEventSink`: where the sink is how an
+adapter hands work in, this is how it remembers where it got to. `InMemoryAdapterStateStore` is the
+default so samples and tests work untouched; a real deployment registers its own through
+`AddResidentAdapters<TSink, TStateStore>()` and backs it with a table.
+
+Three properties are deliberate:
+
+* **Keyed by instance, not by adapter.** Two instances of one adapter are two connections. One
+  reading the other's cursor would skip rows that were never processed.
+* **Not bounded by the in-flight window.** That window exists to stop an adapter flooding the host
+  with events it must persist. A receiver saving its cursor *after* a batch would otherwise queue
+  behind the very events whose progress it is recording.
+* **Failures are raised, not swallowed.** A cursor that silently failed to save is a batch that
+  will be replayed, and the adapter is the only thing positioned to stop rather than carry on.
+
+It is a bookmark, not a data store, and a host is entitled to refuse a large value.
+
+This is the same role Airbyte's `state` argument plays for its connectors, and it is what makes a
+polling database receiver possible at all — see Bitween's `docs/provider-plan-databases.md`.
+
+### 14.10 A pool keyed by adapter id is a configuration leak
+
+`RentAsync` keyed its pools on `spec.AdapterId`, and `GetOrAdd` captures the spec of whichever
+caller created the pool first — **including its startup values, which is where the connection
+string and the credentials live**. One adapter serving two data sources therefore handed the second
+one a process connected as the first, with no error anywhere: every later renter silently ran
+against the wrong system.
+
+Masked until now because bus providers run as *exclusive* instances keyed by data source and never
+go through the pool. Anything that rents — Bitween's Xchange pipeline does, through
+`ResidentAdapterRuntime` — was exposed, and a pooled database adapter would be exposed by design.
+
+Fixed by keying on `AdapterSpec.PoolKey` when set, and otherwise on the adapter id plus a hash of
+the startup values, so identical configuration shares warm processes and differing configuration
+cannot. Hashed rather than concatenated because the key reaches logs and diagnostics.
+
 ---
 
 ## 15. What "gRPC over UDS / named pipe" actually means

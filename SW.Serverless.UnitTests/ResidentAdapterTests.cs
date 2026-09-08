@@ -295,6 +295,95 @@ namespace SW.Serverless.UnitTests
 
         // ------------------------------------------------------------------ helpers
 
+        // ------------------------------------------------------------------ host-held state
+
+        /// <summary>
+        /// The property a polling receiver's cursor depends on: state written through the host
+        /// outlives the adapter process, so a restart resumes where it left off instead of
+        /// replaying from the beginning.
+        /// </summary>
+        [TestMethod]
+        public async Task State_survives_a_restart_of_the_adapter()
+        {
+            var instance = await StartTicker("state");
+
+            await instance.InvokeAsync<object>("SaveCursor", "2026-09-08T10:00:00Z");
+
+            var before = await instance.InvokeAsync<Dictionary<string, string>>("ReadCursor");
+            Assert.AreEqual("2026-09-08T10:00:00Z", before["cursor"]);
+
+            // Same instance key, a brand new process — which is exactly what the supervisor does
+            // after a crash.
+            var restarted = await adapters.RestartAsync(TickerId, "state", drain: false);
+
+            var after = await restarted.InvokeAsync<Dictionary<string, string>>("ReadCursor");
+            Assert.AreEqual("2026-09-08T10:00:00Z", after["cursor"],
+                "the cursor is the host's, so a new process must still see it");
+
+            await restarted.InvokeAsync<object>("ClearCursor");
+            var cleared = await restarted.InvokeAsync<Dictionary<string, string>>("ReadCursor");
+            Assert.IsNull(cleared["cursor"]);
+
+            await adapters.StopAsync(TickerId, "state", drain: false);
+        }
+
+        /// <summary>
+        /// State belongs to the INSTANCE, not to the adapter. Two data sources served by one
+        /// adapter are two connections, and one's cursor read by the other would skip rows.
+        /// </summary>
+        [TestMethod]
+        public async Task State_is_scoped_to_the_instance()
+        {
+            var first = await StartTicker("state-a");
+            var second = await StartTicker("state-b");
+
+            await first.InvokeAsync<object>("SaveCursor", "a");
+
+            var read = await second.InvokeAsync<Dictionary<string, string>>("ReadCursor");
+            Assert.IsNull(read["cursor"], "one instance must not see another instance's state");
+
+            await adapters.StopAsync(TickerId, "state-a", drain: false);
+            await adapters.StopAsync(TickerId, "state-b", drain: false);
+        }
+
+        // ------------------------------------------------------------------ pool keying
+
+        /// <summary>
+        /// Two data sources on one adapter id must not share warm processes: the pool captures the
+        /// spec of whichever renter created it, credentials included, so sharing a key meant the
+        /// second data source silently ran against the first one's system.
+        /// </summary>
+        [TestMethod]
+        public void Pool_key_separates_specs_that_differ_in_configuration()
+        {
+            var one = new AdapterSpec
+            {
+                AdapterId = "db.oracle",
+                StartupValues = { ["Host"] = "one.example", ["Password"] = "s1" }
+            };
+            var two = new AdapterSpec
+            {
+                AdapterId = "db.oracle",
+                StartupValues = { ["Host"] = "two.example", ["Password"] = "s2" }
+            };
+            var alsoOne = new AdapterSpec
+            {
+                AdapterId = "db.oracle",
+                // Same pairs, written in the other order: the key is canonical, so these share.
+                StartupValues = { ["Password"] = "s1", ["Host"] = "one.example" }
+            };
+
+            Assert.AreNotEqual(ResidentAdapterHost.PoolKeyOf(one), ResidentAdapterHost.PoolKeyOf(two));
+            Assert.AreEqual(ResidentAdapterHost.PoolKeyOf(one), ResidentAdapterHost.PoolKeyOf(alsoOne));
+
+            // An explicit key wins, and nothing secret is readable in either form.
+            var keyed = new AdapterSpec { AdapterId = "db.oracle", PoolKey = "datasource-7" };
+            Assert.AreEqual("db.oracle:datasource-7", ResidentAdapterHost.PoolKeyOf(keyed));
+            StringAssert.Contains(ResidentAdapterHost.PoolKeyOf(one), "db.oracle:");
+            Assert.IsFalse(ResidentAdapterHost.PoolKeyOf(one).Contains("s1"),
+                "the pool key ends up in logs, so it must not carry credentials");
+        }
+
         static Task<ResidentAdapterInstance> StartTicker(string key, int intervalSeconds = 30) =>
             adapters.StartExclusiveAsync(new AdapterSpec
             {

@@ -44,6 +44,27 @@ namespace SW.Serverless.Sdk.Resident
             string contentType = null,
             CancellationToken cancellationToken = default);
 
+        /// <summary>
+        /// Reads a small piece of durable state the HOST holds on this adapter's behalf. Null when
+        /// nothing is stored under that name.
+        ///
+        /// An adapter must not be the system of record for its own progress: the supervisor
+        /// restarts it, the next instance may be on another node, and a pooled one is not even the
+        /// same process twice. A polling receiver's cursor is the case this exists for — the same
+        /// role Airbyte's `state` argument plays. Keep it to a bookmark; it is not a data store,
+        /// and the host is entitled to refuse a large value.
+        /// </summary>
+        Task<string> GetStateAsync(string name, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Writes that state, durably, before returning. A null value deletes it.
+        ///
+        /// Call it at the point the progress is real — after the rows it describes have been
+        /// accepted by the host — because anything written earlier is a promise the next instance
+        /// will believe.
+        /// </summary>
+        Task SetStateAsync(string name, string value, CancellationToken cancellationToken = default);
+
         void Log(AdapterLogLevel level, string message, Exception exception = null,
             IDictionary<string, string> properties = null);
 

@@ -136,6 +136,26 @@ namespace SW.Serverless.Samples.Ticker
         public Task<object> GetCounters() =>
             Task.FromResult<object>(new { produced, accepted, rejected, lastMessageOn });
 
+        /// <summary>
+        /// Host-held state, the way a polling receiver keeps its cursor: written through the host
+        /// so that it survives a restart and is still there when the next instance comes up —
+        /// possibly on another node, possibly as a different process entirely.
+        /// </summary>
+        public async Task<object> SaveCursor(string value)
+        {
+            await context.SetStateAsync("cursor", value);
+            return new { saved = value };
+        }
+
+        public async Task<object> ReadCursor() =>
+            new { cursor = await context.GetStateAsync("cursor") };
+
+        public async Task<object> ClearCursor()
+        {
+            await context.SetStateAsync("cursor", null);
+            return new { cleared = true };
+        }
+
         /// <summary>Demonstrates that a command failure comes back as a typed error, not a hang.</summary>
         public Task Explode() => throw new InvalidOperationException("Deliberate failure from the ticker sample.");
 

@@ -42,7 +42,9 @@ You get, without asking for it:
   libraries they use — log reaches the host under `serverless.adapters.{id}`.
 * **`IConfiguration`** built from startup values, with cloud metadata namespaced under
   `AdapterValues:` so it can never shadow them.
-* **`IAdapterContext`** for pushing events and metrics, injectable anywhere.
+* **`IAdapterContext`** for pushing events and metrics, injectable anywhere — and for reading and
+  writing small durable state the host holds on the adapter's behalf (`GetStateAsync` /
+  `SetStateAsync`), which is where a polling receiver keeps its cursor.
 * **`AdapterSession.Id`** — ambient per-invocation identity, and the boundary a pooled adapter
   needs so state cannot leak between checkouts.
 
