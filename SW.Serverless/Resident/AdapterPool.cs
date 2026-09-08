@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -46,6 +47,14 @@ namespace SW.Serverless.Resident
                 ? Math.Min(n, MaxPoolSize)
                 : 4;
 
+        /// <summary>Per-adapter override for <see cref="ResidentOptions.IdleTimeout"/>, same shape as PoolSize.</summary>
+        static TimeSpan IdleTimeoutFor(AdapterSpec spec, ResidentOptions options) =>
+            spec.AdapterValues != null &&
+            spec.AdapterValues.TryGetValue("IdleTimeoutSeconds", out var raw) &&
+            double.TryParse(raw, out var seconds) && seconds > 0
+                ? TimeSpan.FromSeconds(seconds)
+                : options.IdleTimeout;
+
         public async Task<IAdapterLease> RentAsync(CancellationToken cancellationToken)
         {
             await slots.WaitAsync(cancellationToken);
@@ -71,6 +80,7 @@ namespace SW.Serverless.Resident
                     catch (Exception ex) { logger.LogWarning(ex, "Could not retire pooled slot {Slot}.", retiring); }
                 }
 
+                instance.IdleSince = null;
                 return new Lease(this, instance);
             }
             catch
@@ -91,6 +101,7 @@ namespace SW.Serverless.Resident
                     // and the next lease could see the previous session's state — the exact leak
                     // this boundary exists to prevent.
                     await instance.ResetAsync(sessionId);
+                    instance.IdleSince = DateTimeOffset.UtcNow;
                     idle.Add(instance);
                 }
             }
@@ -109,6 +120,51 @@ namespace SW.Serverless.Resident
             finally
             {
                 if (!disposed) slots.Release();
+            }
+        }
+
+        /// <summary>
+        /// Retires warm instances that have sat checked-in longer than the idle timeout, so a
+        /// quiet pool shrinks back down instead of holding its peak size forever. Called
+        /// periodically by the host's supervisor loop (design doc 14.5's "idle eviction"). A no-op
+        /// when no idle timeout is configured for this adapter.
+        /// </summary>
+        public async Task EvictIdleAsync()
+        {
+            var idleTimeout = IdleTimeoutFor(spec, options);
+            if (idleTimeout <= TimeSpan.Zero) return;
+
+            var now = DateTimeOffset.UtcNow;
+            var keep = new List<ResidentAdapterInstance>();
+            var stale = new List<(string Slot, ResidentAdapterInstance Instance)>();
+
+            // Drain-then-rebuild rather than inspecting in place: ConcurrentBag has no way to
+            // remove a specific item, only to pop an arbitrary one. A RentAsync racing this sweep
+            // may briefly see fewer idle instances than exist and spawn one it did not strictly
+            // need to — self-correcting on the next return, and far cheaper than a lock around the
+            // whole bag.
+            while (idle.TryTake(out var instance))
+            {
+                var slot = instance.IdleSince.HasValue && now - instance.IdleSince.Value >= idleTimeout
+                    ? all.FirstOrDefault(kv => ReferenceEquals(kv.Value, instance)).Key
+                    : null;
+
+                if (slot != null) stale.Add((slot, instance));
+                else keep.Add(instance);
+            }
+
+            foreach (var instance in keep) idle.Add(instance);
+
+            foreach (var (slot, instance) in stale)
+            {
+                if (!all.TryRemove(slot, out _)) continue;
+
+                logger.LogInformation(
+                    "Retiring idle pooled instance {AdapterId}/{Slot}: idle for {Idle}, timeout is {Timeout}.",
+                    spec.AdapterId, slot, now - instance.IdleSince.Value, idleTimeout);
+
+                try { await host.RetireAsync(spec.AdapterId, slot); }
+                catch (Exception ex) { logger.LogWarning(ex, "Could not retire idle pooled slot {Slot}.", slot); }
             }
         }
 

@@ -451,6 +451,7 @@ namespace SW.Serverless.Resident
                 Quarantined = supervised.Quarantined,
                 DrainRequested = supervised.DrainRequested,
                 LastHeartbeatOn = supervised.LastHeartbeatOn,
+                IdleSince = instance.IdleSince,
                 Capabilities = instance.Capabilities,
                 Commands = instance.Commands,
                 CommandDetails = instance.CommandDetails,
@@ -493,6 +494,7 @@ namespace SW.Serverless.Resident
                 // every adapter behind it in the loop, so a whole node could look healthy because
                 // the first instance was hanging.
                 await Task.WhenAll(instances.Values.ToArray().Select(HeartbeatAsync));
+                await Task.WhenAll(pools.Values.ToArray().Select(p => p.EvictIdleAsync()));
             }
         }
 

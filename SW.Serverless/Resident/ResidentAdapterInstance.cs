@@ -68,6 +68,14 @@ namespace SW.Serverless.Resident
         public IReadOnlyDictionary<string, string> StartupValues { get; internal set; }
 
         /// <summary>
+        /// When this pooled instance was last checked back in. Null while checked out, while
+        /// exclusive (never pooled), or freshly spawned. Set by <see cref="AdapterPool"/>; the
+        /// idle-eviction sweep in <see cref="ResidentAdapterHost"/> reads it to age out warm
+        /// instances nobody has rented in a while.
+        /// </summary>
+        public DateTimeOffset? IdleSince { get; internal set; }
+
+        /// <summary>
         /// What the adapter said it can do, from its Hello frame: "resident", "resettable", and
         /// "command:{Name}" for every command it discovered on its handler. A UI can build itself
         /// from this instead of hardcoding what each adapter offers.
