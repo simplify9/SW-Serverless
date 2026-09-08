@@ -45,6 +45,20 @@ var result = await lease
 </section>
 
 <section class="card">
+    <h2>Idle eviction</h2>
+    <p class="sub">
+        A warm pool trades memory for speed — but only while it is actually being used. This
+        page's lease carries <code>["IdleTimeoutSeconds"] = "15"</code>, overriding the host's
+        20-second default (set once in <code>Program.cs</code>) for <code>sample.carrier</code>
+        specifically. Create a shipment or two, then stop clicking: on the
+        <a href="/">Adapters</a> page, watch <code>sample.carrier</code>'s idle instance(s) sit at
+        <b>"idle for Ns"</b> and disappear once 15 seconds pass — the pool's supervisor sweep
+        retired it and the warm set shrank back down. The next <em>Create shipment</em> after that
+        pays a fresh process spawn again, same as the very first call ever made.
+    </p>
+</section>
+
+<section class="card">
     <h2>Create a shipment</h2>
     <div class="actions">
         <input @bind="reference" placeholder="reference" />
@@ -138,7 +152,7 @@ var result = await lease
             {
                 AdapterId = DemoBootstrapper.CarrierId,
                 StartupValues = CarrierSettings,
-                AdapterValues = { ["Poolable"] = "true", ["PoolSize"] = "3" }
+                AdapterValues = { ["Poolable"] = "true", ["PoolSize"] = "3", ["IdleTimeoutSeconds"] = "15" }
             });
 
             var result = await lease.InvokeAsync<string>("CreateShipment", request, timeoutSeconds: 30);
@@ -181,7 +195,7 @@ var result = await lease
             {
                 AdapterId = DemoBootstrapper.CarrierId,
                 StartupValues = CarrierSettings,
-                AdapterValues = { ["Poolable"] = "true", ["PoolSize"] = "3" }
+                AdapterValues = { ["Poolable"] = "true", ["PoolSize"] = "3", ["IdleTimeoutSeconds"] = "15" }
             });
 
             trackResult = await lease.InvokeAsync<string>("Track",
