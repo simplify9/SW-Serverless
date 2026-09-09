@@ -62,6 +62,11 @@ namespace SW.Serverless.Sdk.Resident
         IReadOnlyDictionary<string, string> startupValues = new Dictionary<string, string>();
         IReadOnlyDictionary<string, string> adapterValues = new Dictionary<string, string>();
 
+        static readonly IReadOnlyDictionary<string, string> Empty = new Dictionary<string, string>();
+
+        // Per async flow, so concurrent commands on one shared instance do not read each other's.
+        static readonly AsyncLocal<IReadOnlyDictionary<string, string>> invocationValues = new();
+
         ResidentRunner(Type handlerType, Func<IAdapterContext, object> handlerFactory)
         {
             this.handlerType = handlerType;
@@ -304,6 +309,14 @@ namespace SW.Serverless.Sdk.Resident
                 if (!commands.TryGetValue(invoke.Command, out var method))
                     throw new MissingMethodException(handlerType.FullName, invoke.Command);
 
+                // Set on THIS async flow, before the handler runs, so concurrent invocations on a
+                // shared instance each see their own caller's configuration. AsyncLocal rather than
+                // a field for exactly that reason: several commands are in flight at once by
+                // design, and a field would have the last one in overwrite the rest.
+                invocationValues.Value = invoke.Properties.Count == 0
+                    ? Empty
+                    : new Dictionary<string, string>(invoke.Properties);
+
                 // The host's session id when it grouped this call with others, otherwise the
                 // call stands alone.
                 using var session = AdapterSession.Begin(
@@ -487,6 +500,16 @@ namespace SW.Serverless.Sdk.Resident
 
         public string StartupValueOf(string name) =>
             startupValues.TryGetValue(name, out var v) ? v : null;
+
+        public IReadOnlyDictionary<string, string> InvocationValues => invocationValues.Value ?? Empty;
+
+        public string ValueOf(string name)
+        {
+            var perCall = invocationValues.Value;
+            if (perCall != null && perCall.TryGetValue(name, out var value)) return value;
+
+            return StartupValueOf(name);
+        }
 
         public async Task<PublishResult> PublishAsync(
             ReadOnlyMemory<byte> payload, string dedupeKey, string endpoint = null,

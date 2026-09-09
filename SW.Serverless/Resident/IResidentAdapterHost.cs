@@ -17,7 +17,8 @@ namespace SW.Serverless.Resident
         /// disposal then clears through IResettable.
         /// </summary>
         Task<TResult> InvokeAsync<TResult>(string command, object input = null,
-            int timeoutSeconds = 0, CancellationToken cancellationToken = default);
+            int timeoutSeconds = 0, CancellationToken cancellationToken = default,
+            IDictionary<string, string> properties = null);
     }
 
     /// <summary>

@@ -195,8 +195,10 @@ namespace SW.Serverless.Resident
             public string SessionId { get; }
 
             public Task<TResult> InvokeAsync<TResult>(string command, object input = null,
-                int timeoutSeconds = 0, CancellationToken cancellationToken = default) =>
-                Instance.InvokeAsync<TResult>(command, input, timeoutSeconds, cancellationToken, SessionId);
+                int timeoutSeconds = 0, CancellationToken cancellationToken = default,
+                IDictionary<string, string> properties = null) =>
+                Instance.InvokeAsync<TResult>(command, input, timeoutSeconds, cancellationToken,
+                    SessionId, properties);
 
             public ValueTask DisposeAsync() => new(pool.ReturnAsync(Instance, SessionId));
         }

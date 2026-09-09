@@ -295,6 +295,84 @@ namespace SW.Serverless.UnitTests
 
         // ------------------------------------------------------------------ helpers
 
+        // ------------------------------------------------------------------ per-invocation properties
+
+        /// <summary>
+        /// Configuration that travels with the CALL rather than with the process. An exclusive
+        /// instance is shared by every caller pointed at it, so anything that varies per caller —
+        /// which statement to run, which tenant this is — cannot live in the startup values.
+        /// </summary>
+        [TestMethod]
+        public async Task Per_invocation_properties_reach_the_command()
+        {
+            var instance = await StartTicker("percall");
+
+            var answer = await instance.InvokeAsync<Dictionary<string, string>>(
+                "ReadValue", "Tag",
+                properties: new Dictionary<string, string> { ["Tag"] = "invoice-run" });
+
+            Assert.AreEqual("invoice-run", answer["invocation"]);
+            Assert.IsNull(answer["startup"], "the process was never told about Tag");
+            Assert.AreEqual("invoice-run", answer["resolved"]);
+
+            await adapters.StopAsync(TickerId, "percall", drain: false);
+        }
+
+        /// <summary>
+        /// A per-call value wins over the process default, and an adapter called WITHOUT properties
+        /// still sees the startup value — which is what keeps every existing adapter working.
+        /// </summary>
+        [TestMethod]
+        public async Task A_per_invocation_value_overrides_the_startup_value()
+        {
+            var instance = await StartTicker("override", intervalSeconds: 30);
+
+            var overridden = await instance.InvokeAsync<Dictionary<string, string>>(
+                "ReadValue", "IntervalSeconds",
+                properties: new Dictionary<string, string> { ["IntervalSeconds"] = "5" });
+
+            Assert.AreEqual("5", overridden["resolved"]);
+            Assert.AreEqual("30", overridden["startup"], "the startup value is still there underneath");
+
+            var plain = await instance.InvokeAsync<Dictionary<string, string>>(
+                "ReadValue", "IntervalSeconds");
+
+            Assert.AreEqual("30", plain["resolved"], "no properties means the process default, as before");
+            Assert.IsNull(plain["invocation"]);
+
+            await adapters.StopAsync(TickerId, "override", drain: false);
+        }
+
+        /// <summary>
+        /// The reason this is an AsyncLocal and not a field. Several commands run at once on one
+        /// instance by design — that is what multiplexing is for — and a field would have the last
+        /// caller in overwrite everyone else's configuration mid-flight.
+        /// </summary>
+        [TestMethod]
+        public async Task Concurrent_invocations_do_not_see_each_others_properties()
+        {
+            var instance = await StartTicker("concurrent");
+
+            var first = instance.InvokeAsync<Dictionary<string, string>>(
+                "ReadValueSlowly", "Tag",
+                properties: new Dictionary<string, string> { ["Tag"] = "alpha" });
+
+            var second = instance.InvokeAsync<Dictionary<string, string>>(
+                "ReadValueSlowly", "Tag",
+                properties: new Dictionary<string, string> { ["Tag"] = "beta" });
+
+            await Task.WhenAll(first, second);
+
+            // Both sides of the await, because the value has to survive the continuation as well as
+            // arrive on the way in.
+            Assert.AreEqual("alpha", first.Result["before"]);
+            Assert.AreEqual("alpha", first.Result["after"]);
+            Assert.AreEqual("beta", second.Result["before"]);
+            Assert.AreEqual("beta", second.Result["after"]);
+
+            await adapters.StopAsync(TickerId, "concurrent", drain: false);
+        }
+
         // ------------------------------------------------------------------ host-held state
 
         /// <summary>

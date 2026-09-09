@@ -47,6 +47,15 @@ message Invoke {
     // request. Traxis calls a command and then GetLogs; both must see the SAME session or the
     // audit trail comes back empty. Absent means "this call alone".
     string session_id = 4;
+
+    // Configuration for THIS call, on top of the startup values the process was given.
+    //
+    // An exclusive resident instance is shared: in Bitween one database connection serves every
+    // subscription bound to it, and each of those has its own settings — which statement to run,
+    // which operation it is. Startup values cannot carry that, because they belong to the process
+    // and the process belongs to all of them. This is the same reason session_id exists: a shared
+    // instance has to be told whose call this is.
+    map<string, string> properties = 5;
 }
 
 message Ping {}

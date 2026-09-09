@@ -1609,6 +1609,39 @@ Fixed by keying on `AdapterSpec.PoolKey` when set, and otherwise on the adapter 
 the startup values, so identical configuration shares warm processes and differing configuration
 cannot. Hashed rather than concatenated because the key reaches logs and diagnostics.
 
+### 14.11 A shared instance needs per-call configuration
+
+§14.5 gave the exclusive resident one instance per key, and §4 assumed that instance had one
+caller. It does not. In Bitween a relational data source is one process holding one connection
+pool, and *every* subscription bound to that data source runs through it — each with its own
+settings: which statement to run, which operation it is, which tenant this is.
+
+Startup values cannot carry any of that. They are handed over once, in `Ready`, and they belong to
+the process — which belongs to all of those callers at once. So the invocation grows a
+`map<string, string> properties`, alongside the `session_id` that exists for the same underlying
+reason: a shared instance has to be told whose call this is.
+
+On the adapter side that surfaces as two members on `IAdapterContext`:
+
+```csharp
+IReadOnlyDictionary<string, string> InvocationValues { get; }  // this call's, empty outside one
+string ValueOf(string name);                                   // invocation first, then startup
+```
+
+`ValueOf` is the one to reach for. A per-call setting overrides the process default, and an adapter
+whose callers send no properties behaves exactly as it did before any of this existed — which is
+what keeps the existing fleet working.
+
+**It is an `AsyncLocal`, and that is the whole subtlety.** Several commands run on one instance at
+the same time; multiplexing is the point of the stream. A field would have the last caller in
+overwrite everyone else's configuration mid-flight, and the failure would be intermittent,
+load-dependent and near-impossible to reproduce — one subscription silently running another's
+statement. It is set on the invoking flow before the handler is called, so it survives the
+handler's own awaits and cannot leak sideways.
+
+Without this the shared-instance shape is only usable by callers that all want identical behaviour,
+which for a database connection is nobody.
+
 ---
 
 ## 15. What "gRPC over UDS / named pipe" actually means

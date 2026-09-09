@@ -28,6 +28,24 @@ namespace SW.Serverless.Sdk.Resident
         IReadOnlyDictionary<string, string> AdapterValues { get; }
         string StartupValueOf(string name);
 
+        /// <summary>
+        /// Configuration for the command CURRENTLY running on this async flow, sent by the host
+        /// with the invocation. Empty outside a command, and empty when the caller sent none.
+        ///
+        /// It exists because an exclusive instance is shared. One database connection serves every
+        /// subscription pointed at it, and each of those has its own settings — which statement to
+        /// run, which operation it is. Startup values cannot carry that: they belong to the process,
+        /// and the process belongs to all of them.
+        /// </summary>
+        IReadOnlyDictionary<string, string> InvocationValues { get; }
+
+        /// <summary>
+        /// <see cref="InvocationValues"/> first, then <see cref="StartupValues"/>. This is the one
+        /// to reach for: a per-call setting overrides the process default, and an adapter serving a
+        /// single caller behaves exactly as it did before any of this existed.
+        /// </summary>
+        string ValueOf(string name);
+
         /// <summary>Cancelled when the host asks the adapter to shut down.</summary>
         CancellationToken Stopping { get; }
 
