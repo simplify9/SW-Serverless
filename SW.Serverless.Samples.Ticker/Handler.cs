@@ -156,6 +156,30 @@ namespace SW.Serverless.Samples.Ticker
             return new { cleared = true };
         }
 
+        /// <summary>
+        /// Per-call configuration, which is what a SHARED instance needs: one process serving many
+        /// callers cannot take per-caller settings from its startup values, because those belong to
+        /// the process.
+        /// </summary>
+        public Task<object> ReadValue(string name) => Task.FromResult<object>(new
+        {
+            invocation = context.InvocationValues.TryGetValue(name, out var v) ? v : null,
+            startup = context.StartupValueOf(name),
+            resolved = context.ValueOf(name)
+        });
+
+        /// <summary>
+        /// Reads the same value either side of an await, so a test can prove two concurrent callers
+        /// do not see each other's — the failure an ordinary field would have.
+        /// </summary>
+        public async Task<object> ReadValueSlowly(string name)
+        {
+            var before = context.ValueOf(name);
+            await Task.Delay(300);
+            var after = context.ValueOf(name);
+            return new { before, after };
+        }
+
         /// <summary>Demonstrates that a command failure comes back as a typed error, not a hang.</summary>
         public Task Explode() => throw new InvalidOperationException("Deliberate failure from the ticker sample.");
 

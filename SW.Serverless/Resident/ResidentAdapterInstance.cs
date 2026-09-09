@@ -336,12 +336,18 @@ namespace SW.Serverless.Resident
 
         void Send(HostFrame frame) => outbound.Writer.TryWrite(frame);
 
+        /// <summary>
+        /// <paramref name="properties"/> is configuration for THIS call, on top of the startup
+        /// values the process holds. An exclusive instance is shared by every caller pointed at it,
+        /// so anything that varies per caller has to travel with the call rather than with the
+        /// process.
+        /// </summary>
         public async Task<TResult> InvokeAsync<TResult>(string command, object input = null,
             int timeoutSeconds = 0, CancellationToken cancellationToken = default,
-            string sessionId = null)
+            string sessionId = null, IDictionary<string, string> properties = null)
         {
             var bytes = await InvokeAsync(command, Serialize(input), timeoutSeconds,
-                cancellationToken, sessionId);
+                cancellationToken, sessionId, properties);
             if (bytes == null || bytes.Length == 0) return default;
             if (typeof(TResult) == typeof(byte[])) return (TResult)(object)bytes;
             var text = System.Text.Encoding.UTF8.GetString(bytes);
@@ -351,7 +357,7 @@ namespace SW.Serverless.Resident
 
         public async Task<byte[]> InvokeAsync(string command, byte[] payload = null,
             int timeoutSeconds = 0, CancellationToken cancellationToken = default,
-            string sessionId = null)
+            string sessionId = null, IDictionary<string, string> properties = null)
         {
             if (State != InstanceState.Ready)
                 throw new InvalidOperationException($"Adapter {AdapterId} is {State}, not Ready.");
@@ -380,17 +386,23 @@ namespace SW.Serverless.Resident
                 }
             }, null, timeout, Timeout.InfiniteTimeSpan);
 
+            var invoke = new Invoke
+            {
+                Command = command,
+                Payload = payload == null ? ByteString.Empty : ByteString.CopyFrom(payload),
+                TimeoutSeconds = (int)timeout.TotalSeconds,
+                SessionId = sessionId ?? ""
+            };
+
+            if (properties != null)
+                foreach (var kv in properties)
+                    invoke.Properties[kv.Key] = kv.Value ?? "";
+
             Send(new HostFrame
             {
                 Id = id,
                 Traceparent = Activity.Current?.Id ?? "",
-                Invoke = new Invoke
-                {
-                    Command = command,
-                    Payload = payload == null ? ByteString.Empty : ByteString.CopyFrom(payload),
-                    TimeoutSeconds = (int)timeout.TotalSeconds,
-                    SessionId = sessionId ?? ""
-                }
+                Invoke = invoke
             });
 
             using (cancellationToken.Register(() =>

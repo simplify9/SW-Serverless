@@ -44,7 +44,8 @@ You get, without asking for it:
   `AdapterValues:` so it can never shadow them.
 * **`IAdapterContext`** for pushing events and metrics, injectable anywhere — and for reading and
   writing small durable state the host holds on the adapter's behalf (`GetStateAsync` /
-  `SetStateAsync`), which is where a polling receiver keeps its cursor.
+  `SetStateAsync`), which is where a polling receiver keeps its cursor, and for per-call
+  configuration on a shared instance (`ValueOf` / `InvocationValues`).
 * **`AdapterSession.Id`** — ambient per-invocation identity, and the boundary a pooled adapter
   needs so state cannot leak between checkouts.
 
