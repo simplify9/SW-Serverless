@@ -15,7 +15,7 @@
 
     <ItemGroup>
         <!-- Local-filesystem ICloudFilesService: the real install-from-storage path, no credentials. -->
-        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="8.1.6" />
+        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="8.1.12" />
     </ItemGroup>
 
     <ItemGroup>
