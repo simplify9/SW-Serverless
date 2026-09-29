@@ -5,48 +5,29 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# No token scopes by default. The Publish job grants the ceiling the reusable
+# workflow's jobs run under; each of its jobs narrows it further.
+permissions: {}
+
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    env:
-      MAJOR: '8'
-      MINOR: '1'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Determine semantic version
-        id: semver
-        uses: simplify9/.github/.github/actions/determine-semver@main
-        with:
-          major: ${{ env.MAJOR }}
-          minor: ${{ env.MINOR }}
-
-      - name: Dotnet Restore, Build, and Test
-        uses: simplify9/.github/.github/actions/dotnet-build@main
-        with:
-          projects: "**/*.csproj"
-          test-projects: "**/*UnitTests/*.csproj"
-          configuration: "Release"
-          dotnet-version: "8.0.x"
-          run-tests: 'false'
-
-      - name: Pack and Push NuGet Packages
-        uses: simplify9/.github/.github/actions/dotnet-pack-push@main
-        with:
-          # Contract FIRST: both of the others depend on it, and publishing them without it
-          # produces packages whose dependency cannot resolve — which is what 8.1.13 shipped as.
-          projects: "SW.Serverless.Contract/SW.Serverless.Contract.csproj SW.Serverless/SW.Serverless.csproj SW.Serverless.Sdk/SW.Serverless.Sdk.csproj"
-          configuration: "Release"
-          version: ${{ steps.semver.outputs.version }}
-          api-key: ${{ secrets.SWNUGETKEY }}
-          nuget-source: "https://api.nuget.org/v3/index.json"
-
-
-      - name: Tag new version on GitHub origin
-        uses: simplify9/.github/.github/actions/tag-github-origin@main
-        with:
-          github-token: ${{ secrets.S9_GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          tag: ${{ steps.semver.outputs.version }}
-          sha: ${{ github.sha }}
+  Publish:
+    permissions:
+      contents: write         # tag job: create the git tag
+      packages: write         # nuget job: only used when pushing to a GitHub Packages feed
+      security-events: read   # critical-vuln gate job
+    uses: simplify9/.github/.github/workflows/reusable-nuget-publish.yml@main
+    with:
+      # Contract FIRST: both of the others depend on it, and publishing them without it
+      # produces packages whose dependency cannot resolve — which is what 8.1.13 shipped as.
+      nuget-projects: >-
+        SW.Serverless.Contract/SW.Serverless.Contract.csproj
+        SW.Serverless/SW.Serverless.csproj
+        SW.Serverless.Sdk/SW.Serverless.Sdk.csproj
+      major-version: '8'
+      minor-version: '1'
+      dotnet-version: '8.0.x'
+      run-tests: false
+      test-projects: '**/*UnitTests/*.csproj'
+    secrets:
+      nuget-api-key: ${{ secrets.SWNUGETKEY }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
