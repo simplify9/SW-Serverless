@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
     <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
+        <TargetFramework>net10.0</TargetFramework>
         <LangVersion>latest</LangVersion>
         <Nullable>disable</Nullable>
         <RootNamespace>SW.Serverless.SampleWeb</RootNamespace>
@@ -15,7 +15,7 @@
 
     <ItemGroup>
         <!-- Local-filesystem ICloudFilesService: the real install-from-storage path, no credentials. -->
-        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="8.1.6" />
+        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="10.0.0" />
     </ItemGroup>
 
     <ItemGroup>

@@ -166,7 +166,7 @@ namespace SW.Serverless.Samples.Host
 #else
                 "Release",
 #endif
-                "net8.0", project + ".dll");
+                "net10.0", project + ".dll");
 
             if (!File.Exists(configuration))
                 throw new FileNotFoundException($"Build {project} first.", configuration);
