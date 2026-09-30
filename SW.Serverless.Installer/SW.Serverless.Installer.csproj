@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>serverless</AssemblyName>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
@@ -10,14 +10,14 @@
   <ItemGroup>
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
-    <PackageReference Include="SimplyWorks.CloudFiles.AS" Version="8.1.12" />
-    <PackageReference Include="SimplyWorks.CloudFiles.AS.Extensions" Version="8.1.12" />
-    <PackageReference Include="SimplyWorks.CloudFiles.GC.Extensions" Version="8.1.12" />
-    <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="8.1.12" />
-    <PackageReference Include="SimplyWorks.CloudFiles.OC.Extensions" Version="8.1.12" />
-    <PackageReference Include="SimplyWorks.CloudFiles.S3" Version="8.1.12" />
-    <PackageReference Include="SimplyWorks.CloudFiles.OC" Version="8.1.12" />
-    <PackageReference Include="SimplyWorks.CloudFiles.S3.Extensions" Version="8.1.12" />
+    <PackageReference Include="SimplyWorks.CloudFiles.AS" Version="10.0.0" />
+    <PackageReference Include="SimplyWorks.CloudFiles.AS.Extensions" Version="10.0.0" />
+    <PackageReference Include="SimplyWorks.CloudFiles.GC.Extensions" Version="10.0.0" />
+    <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="10.0.0" />
+    <PackageReference Include="SimplyWorks.CloudFiles.OC.Extensions" Version="10.0.0" />
+    <PackageReference Include="SimplyWorks.CloudFiles.S3" Version="10.0.0" />
+    <PackageReference Include="SimplyWorks.CloudFiles.OC" Version="10.0.0" />
+    <PackageReference Include="SimplyWorks.CloudFiles.S3.Extensions" Version="10.0.0" />
     <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.11" />
 
   </ItemGroup>
