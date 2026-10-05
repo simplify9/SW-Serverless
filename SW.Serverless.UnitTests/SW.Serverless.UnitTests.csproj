@@ -15,7 +15,7 @@
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
         <!-- Same version Bitween-api pins, so the monorepo stays on one Testcontainers. -->
-        <PackageReference Include="Testcontainers.RabbitMq" Version="3.10.0" />
+        <PackageReference Include="Testcontainers.RabbitMq" Version="4.15.0" />
         <PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
         <PackageReference Include="SimplyWorks.CloudFiles.LocalTests" Version="10.0.0" />
         <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="10.0.0" />
