@@ -343,7 +343,13 @@ namespace SW.Serverless.Samples.LargeFiles
             chunksAcked,
             chunksRejected,
             filesCompleted,
-            selfWorkingSetMb = Environment.WorkingSet / 1024 / 1024
+            selfWorkingSetMb = Environment.WorkingSet / 1024 / 1024,
+
+            // What is actually still referenced, after a full collection. The working set also
+            // counts garbage the GC has not got round to, and how much of that it lets pile up is
+            // sized from the CPU's cache — so on a big-cache machine a perfectly streaming adapter
+            // shows the file's size in "growth". This is the number that says buffering or not.
+            liveHeapMb = GC.GetTotalMemory(forceFullCollection: true) / 1024 / 1024
         });
     }
 }

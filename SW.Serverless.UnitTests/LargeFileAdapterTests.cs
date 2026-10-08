@@ -142,8 +142,10 @@ namespace SW.Serverless.UnitTests
         {
             var instance = await Start("memory");
 
+            // Live heap, not working set: the working set includes uncollected garbage, whose
+            // amount depends on the machine's GC budget, and failed on CI runners for exactly that.
             var before = (await instance.InvokeAsync<JObject>("GetProgress"))
-                .Value<long>("selfWorkingSetMb");
+                .Value<long>("liveHeapMb");
 
             await instance.InvokeAsync<JObject>("GenerateTestFile", 24, timeoutSeconds: 120);
 
@@ -151,12 +153,12 @@ namespace SW.Serverless.UnitTests
             await WaitFor(async () =>
             {
                 var progress = await instance.InvokeAsync<JObject>("GetProgress");
-                peak = Math.Max(peak, progress.Value<long>("selfWorkingSetMb"));
+                peak = Math.Max(peak, progress.Value<long>("liveHeapMb"));
                 return progress.Value<int>("filesCompleted") == 1;
             }, TimeSpan.FromSeconds(120), "the file never finished streaming");
 
             Assert.IsTrue(peak - before < 24,
-                $"working set grew {peak - before} MB while streaming a 24 MB file — it is buffering, not streaming");
+                $"live heap grew {peak - before} MB while streaming a 24 MB file — it is buffering, not streaming");
         }
 
         /// <summary>
