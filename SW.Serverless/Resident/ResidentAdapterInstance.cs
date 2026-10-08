@@ -35,6 +35,12 @@ namespace SW.Serverless.Resident
         readonly Channel<HostFrame> outbound = Channel.CreateUnbounded<HostFrame>(
             new UnboundedChannelOptions { SingleReader = true });
 
+        // State requests are handled off the read loop, one at a time and in order. Inline, a slow
+        // state store held up every frame behind it — pongs included — and the supervisor killed
+        // healthy adapters for missing heartbeats while the database was merely slow.
+        readonly Channel<AdapterFrame> stateRequests = Channel.CreateUnbounded<AdapterFrame>(
+            new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+
         readonly ConcurrentQueue<string> diagnostics = new();
         readonly SemaphoreSlim inbound;
         readonly TaskCompletionSource<bool> attached =
@@ -95,6 +101,15 @@ namespace SW.Serverless.Resident
         public IReadOnlyCollection<AdapterCommand> CommandDetails { get; internal set; }
             = Array.Empty<AdapterCommand>();
 
+        /// <summary>
+        /// Taken down by the host outside the normal lifecycle — a start that timed out, or a
+        /// relaunch nobody wants any more — so its exit is not a crash to restart.
+        /// </summary>
+        internal bool Abandoned { get; set; }
+
+        /// <summary>Keeps the directory this process runs from safe from pruning.</summary>
+        internal IDisposable DirectoryLease { get; set; }
+
         public string SdkVersion { get; internal set; }
         public int ProtocolVersion { get; internal set; }
         public IReadOnlyDictionary<string, string> AdapterValues { get; internal set; }
@@ -135,6 +150,20 @@ namespace SW.Serverless.Resident
                 }
             }, linkedCts.Token);
 
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await foreach (var request in stateRequests.Reader.ReadAllAsync(linkedCts.Token))
+                        await HandleStateAsync(request, linkedCts.Token);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "State handling for {AdapterId}/{InstanceKey} stopped.", AdapterId, InstanceKey);
+                }
+            });
+
             State = InstanceState.Attached;
 
             Send(new HostFrame
@@ -172,6 +201,7 @@ namespace SW.Serverless.Resident
             finally
             {
                 State = InstanceState.Stopped;
+                stateRequests.Writer.TryComplete();
                 FailAllPending(new IOException("Adapter stream closed."));
             }
         }
@@ -230,10 +260,10 @@ namespace SW.Serverless.Resident
                     break;
 
                 case AdapterFrame.BodyOneofCase.State:
-                    // Awaited inline rather than fanned out: state calls are small, ordered per
-                    // adapter by construction, and an adapter that writes a cursor twice in a row
-                    // means the second to be the one that lands.
-                    await HandleStateAsync(frame, ct);
+                    // Queued, not fanned out: an adapter that writes a cursor twice in a row means
+                    // the second to be the one that lands, so they are handled in order — but on
+                    // their own task, so a slow store can't stall the frames behind them.
+                    stateRequests.Writer.TryWrite(frame);
                     break;
 
                 case AdapterFrame.BodyOneofCase.Log:
@@ -370,6 +400,12 @@ namespace SW.Serverless.Resident
             };
             pending[id] = call;
 
+            // The stream may have closed between the state check above and the add: its
+            // FailAllPending has already run, so nothing would ever complete this call and it
+            // waited out the whole timeout.
+            if (State == InstanceState.Stopped && pending.TryRemove(id, out _))
+                throw new IOException("Adapter stream closed.");
+
             var timeout = timeoutSeconds > 0
                 ? TimeSpan.FromSeconds(timeoutSeconds)
                 : options.InvokeTimeout;
@@ -383,6 +419,7 @@ namespace SW.Serverless.Resident
                     c.Timer?.Dispose();
                     c.Completion.TrySetException(new TimeoutException(
                         $"Adapter '{AdapterId}' did not answer '{command}' within {timeout}."));
+                    SendCancel(id);
                 }
             }, null, timeout, Timeout.InfiniteTimeSpan);
 
@@ -411,12 +448,24 @@ namespace SW.Serverless.Resident
                 {
                     c.Timer?.Dispose();
                     c.Completion.TrySetCanceled();
+                    SendCancel(id);
                 }
             }))
             {
                 try { return await call.Completion.Task; }
                 finally { call.Timer?.Dispose(); }
             }
+        }
+
+        /// <summary>
+        /// Tells the adapter the host has stopped waiting for call <paramref name="id"/>, so the
+        /// work can stop too. Without it a timed-out call kept running, and a retry ran the same
+        /// side effect a second time. Only adapters that said they understand it receive it.
+        /// </summary>
+        void SendCancel(long id)
+        {
+            if (State is InstanceState.Ready or InstanceState.Draining && System.Linq.Enumerable.Contains(Capabilities, "cancel"))
+                Send(new HostFrame { Id = id, Cancel = new Cancel() });
         }
 
         public async Task<Pong> PingAsync(TimeSpan timeout)
@@ -533,6 +582,7 @@ namespace SW.Serverless.Resident
             }
             catch { /* teardown */ }
             linkedCts?.Dispose();
+            DirectoryLease?.Dispose();
         }
 
         enum CallKind { Invoke, Ping, Reset }

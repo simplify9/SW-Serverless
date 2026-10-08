@@ -18,8 +18,9 @@ namespace SW.Serverless.UnitTests.Fixtures
     {
         public const string BucketName = "sw-serverless-unittests";
 
+        /// <param name="version">Changes the package hash without changing its content, so a test can publish "a newer version".</param>
         public static async Task PublishAsync(ICloudFilesService cloudFiles, string adapterId,
-            string projectName, IDictionary<string, string> adapterValues = null)
+            string projectName, IDictionary<string, string> adapterValues = null, string version = null)
         {
             var output = LocateBuildOutput(projectName);
 
@@ -30,7 +31,8 @@ namespace SW.Serverless.UnitTests.Fixtures
                         CompressionLevel.Fastest);
 
             buffer.Position = 0;
-            var hash = Convert.ToHexString(await SHA256.HashDataAsync(buffer))[..16].ToLowerInvariant();
+            var hash = Convert.ToHexString(await SHA256.HashDataAsync(buffer))[..16].ToLowerInvariant()
+                       + (version == null ? "" : "-" + version);
             buffer.Position = 0;
 
             var metadata = new Dictionary<string, string>(adapterValues ?? new Dictionary<string, string>())

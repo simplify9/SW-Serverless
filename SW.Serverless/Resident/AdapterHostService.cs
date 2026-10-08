@@ -40,6 +40,16 @@ namespace SW.Serverless.Resident
                 throw new RpcException(new Status(StatusCode.PermissionDenied, "Unknown or already-used token."));
             }
 
+            if (!ProtocolVersions.Supports(first.Hello.ProtocolVersion))
+            {
+                logger.LogError(
+                    "Adapter {AdapterId}/{InstanceKey} speaks protocol {Protocol}; this host speaks {Min} to {Max}.",
+                    instance.AdapterId, instance.InstanceKey, first.Hello.ProtocolVersion,
+                    ProtocolVersions.Min, ProtocolVersions.Max);
+                throw new RpcException(new Status(StatusCode.FailedPrecondition,
+                    $"Protocol {first.Hello.ProtocolVersion} is not supported; this host speaks {ProtocolVersions.Min} to {ProtocolVersions.Max}."));
+            }
+
             instance.Capabilities = first.Hello.Capabilities.ToArray();
             instance.Commands = first.Hello.Capabilities
                 .Where(c => c.StartsWith("command:", System.StringComparison.OrdinalIgnoreCase))

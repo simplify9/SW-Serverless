@@ -11,6 +11,9 @@ namespace SW.Serverless.Sdk
         public bool Void { get; set; }
         //public bool Parameterless { get; set; }
         public Type ParameterType { get; set; }
+
+        /// <summary>Resident only: the method also takes a CancellationToken, last.</summary>
+        public bool TakesCancellation { get; set; }
         
     }
 }

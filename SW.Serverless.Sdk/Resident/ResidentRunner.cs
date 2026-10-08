@@ -27,7 +27,18 @@ namespace SW.Serverless.Sdk.Resident
     /// </summary>
     public sealed class ResidentRunner : IAdapterContext
     {
+        // The newest protocol this SDK speaks, and the oldest. The host offers its newest in the
+        // handshake and this answers with the lower of the two, so a newer host keeps working with
+        // adapters already deployed. An exact match was required before, which would have
+        // stranded every deployed adapter at the first version bump.
         const int ProtocolVersion = 2;
+        const int MinProtocolVersion = 2;
+
+        // gRPC's own ceiling on both sides is 64 MB. A frame over it ended the stream — and every
+        // in-flight call and broker consumer with it — so it is refused here, call by call, with
+        // room left for the envelope.
+        internal const int MaxPayloadBytes = 63 * 1024 * 1024;
+        const int MaxLogTextChars = 32 * 1024;
 
         readonly Type handlerType;
         readonly Func<IAdapterContext, object> handlerFactory;
@@ -54,6 +65,16 @@ namespace SW.Serverless.Sdk.Resident
         readonly ConcurrentDictionary<long, TaskCompletionSource<StateResult>> pendingState = new();
         readonly CancellationTokenSource stopping = new();
 
+        // Commands running now, so a drain waits for them and a Cancel frame can reach one.
+        readonly ConcurrentDictionary<long, RunningInvoke> running = new();
+
+        // Wakes the outbound pump. One signal for both channels: waiting on the two channels'
+        // own WaitToReadAsync with WhenAny left a waiter behind on the idle one every pass, and a
+        // quiet adapter grew by hundreds of MB per million frames.
+        readonly SemaphoreSlim outboundSignal = new(0);
+
+        int protocol = ProtocolVersion;
+
         Handshake handshake;
         SemaphoreSlim inFlight;
         long nextId;
@@ -66,6 +87,7 @@ namespace SW.Serverless.Sdk.Resident
 
         // Per async flow, so concurrent commands on one shared instance do not read each other's.
         static readonly AsyncLocal<IReadOnlyDictionary<string, string>> invocationValues = new();
+        static readonly AsyncLocal<CancellationToken> callCancelled = new();
 
         ResidentRunner(Type handlerType, Func<IAdapterContext, object> handlerFactory)
         {
@@ -109,9 +131,10 @@ namespace SW.Serverless.Sdk.Resident
                 throw new IOException("stdin closed before the handshake arrived; parent process is gone.");
 
             handshake = Handshake.Parse(line);
-            if (handshake.Protocol != ProtocolVersion)
+            if (handshake.Protocol < MinProtocolVersion)
                 throw new NotSupportedException(
-                    $"Host speaks protocol {handshake.Protocol}, this SDK speaks {ProtocolVersion}.");
+                    $"Host speaks protocol {handshake.Protocol}, this SDK speaks {MinProtocolVersion} to {ProtocolVersion}.");
+            protocol = Math.Min(handshake.Protocol, ProtocolVersion);
 
             using var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
             {
@@ -136,7 +159,7 @@ namespace SW.Serverless.Sdk.Resident
                     Token = handshake.Token ?? "",
                     AdapterId = handshake.AdapterId ?? "",
                     InstanceKey = handshake.InstanceKey ?? "",
-                    ProtocolVersion = ProtocolVersion,
+                    ProtocolVersion = protocol,
                     SdkVersion = typeof(ResidentRunner).Assembly.GetName().Version?.ToString() ?? "0.0.0",
                     Capabilities = { Capabilities() },
                     Commands = { CommandInfos() }
@@ -146,9 +169,13 @@ namespace SW.Serverless.Sdk.Resident
             await ReadLoopAsync(call.ResponseStream);
 
             stopping.Cancel();
+
+            // Completed, not abandoned: the pump writes out what is already queued — the last
+            // results of a drain among it — and then stops. Cancelling it first threw those away.
             priority.Writer.TryComplete();
             telemetry.Writer.TryComplete();
-            await Task.WhenAny(writer, Task.Delay(2000));
+            outboundSignal.Release();
+            await Task.WhenAny(writer, Task.Delay(5000));
             try { await call.RequestStream.CompleteAsync(); } catch { /* already torn down */ }
             _ = stdinWatch;
         }
@@ -224,6 +251,8 @@ namespace SW.Serverless.Sdk.Resident
         {
             if (typeof(IResidentAdapter).IsAssignableFrom(handlerType)) yield return "resident";
             if (typeof(IResettable).IsAssignableFrom(handlerType)) yield return "resettable";
+            // Understands the Cancel frame; a host only sends it to adapters that say so.
+            yield return "cancel";
             foreach (var c in commands.Keys) yield return "command:" + c;
         }
 
@@ -243,7 +272,12 @@ namespace SW.Serverless.Sdk.Resident
                     case HostFrame.BodyOneofCase.Invoke:
                         // Deliberately not awaited: a slow command must not block the read loop,
                         // which is the whole point of multiplexing (design doc 3, item 1).
-                        _ = Task.Run(() => OnInvokeAsync(frame.Id, frame.Invoke));
+                        StartInvoke(frame.Id, frame.Invoke);
+                        break;
+
+                    case HostFrame.BodyOneofCase.Cancel:
+                        if (running.TryGetValue(frame.Id, out var cancelled))
+                            try { cancelled.Cancellation.Cancel(); } catch (ObjectDisposedException) { }
                         break;
 
                     case HostFrame.BodyOneofCase.Ping:
@@ -289,6 +323,7 @@ namespace SW.Serverless.Sdk.Resident
             startupValues = new Dictionary<string, string>(ready.StartupValues, StringComparer.OrdinalIgnoreCase);
             adapterValues = new Dictionary<string, string>(ready.AdapterValues, StringComparer.OrdinalIgnoreCase);
             inFlight = new SemaphoreSlim(Math.Max(1, ready.MaxInFlight));
+            Runner.UseResident(startupValues, adapterValues, ValueOf);
 
             // Now, and only now, is it safe to construct the handler.
             handler = handlerFactory(this);
@@ -299,7 +334,29 @@ namespace SW.Serverless.Sdk.Resident
                 await resident.StartAsync(this, stopping.Token);
         }
 
-        async Task OnInvokeAsync(long id, Invoke invoke)
+        /// <summary>
+        /// Starts a command on its own task, with a token cancelled when the host sends Cancel, when
+        /// the call's own timeout passes, or when the adapter stops.
+        /// </summary>
+        void StartInvoke(long id, Invoke invoke)
+        {
+            var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stopping.Token);
+            if (invoke.TimeoutSeconds > 0) cancellation.CancelAfter(TimeSpan.FromSeconds(invoke.TimeoutSeconds));
+
+            var entry = new RunningInvoke { Cancellation = cancellation };
+            running[id] = entry;
+            entry.Task = Task.Run(async () =>
+            {
+                try { await OnInvokeAsync(id, invoke, cancellation.Token); }
+                finally
+                {
+                    running.TryRemove(id, out _);
+                    cancellation.Dispose();
+                }
+            });
+        }
+
+        async Task OnInvokeAsync(long id, Invoke invoke, CancellationToken cancellationToken)
         {
             try
             {
@@ -316,6 +373,7 @@ namespace SW.Serverless.Sdk.Resident
                 invocationValues.Value = invoke.Properties.Count == 0
                     ? Empty
                     : new Dictionary<string, string>(invoke.Properties);
+                callCancelled.Value = cancellationToken;
 
                 // The host's session id when it grouped this call with others, otherwise the
                 // call stands alone.
@@ -334,9 +392,11 @@ namespace SW.Serverless.Sdk.Resident
                             : JsonConvert.DeserializeObject(text, method.ParameterType);
                 }
 
-                var task = (Task)(method.ParameterType == null
-                    ? method.MethodInfo.Invoke(handler, null)
-                    : method.MethodInfo.Invoke(handler, new[] { arg }));
+                var arguments = new List<object>(2);
+                if (method.ParameterType != null) arguments.Add(arg);
+                if (method.TakesCancellation) arguments.Add(cancellationToken);
+
+                var task = (Task)method.MethodInfo.Invoke(handler, arguments.ToArray());
 
                 await task.ConfigureAwait(false);
 
@@ -349,6 +409,10 @@ namespace SW.Serverless.Sdk.Resident
                             ? ByteString.CopyFrom(bytes)
                             : ByteString.CopyFromUtf8(result is string s ? s : JsonConvert.SerializeObject(result));
                 }
+
+                if (payload.Length > MaxPayloadBytes)
+                    throw new InvalidOperationException(
+                        $"The result of '{invoke.Command}' is {payload.Length} bytes; the most one call can return is {MaxPayloadBytes}.");
 
                 Send(new AdapterFrame { Id = id, InvokeResult = new InvokeResult { Payload = payload } });
             }
@@ -424,12 +488,21 @@ namespace SW.Serverless.Sdk.Resident
             // Cancelling `stopping` FIRST made drain impossible: the adapter's own token — the one
             // its consume loop and PublishAsync calls observe — was already cancelled, so there
             // was nothing left to finish. Ask it to stop, let it drain, and only then cancel.
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(shutdown.Drain ? 30 : 5);
             if (resident != null)
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(shutdown.Drain ? 30 : 5));
+                using var cts = new CancellationTokenSource(deadline - DateTime.UtcNow);
                 try { await resident.StopAsync(cts.Token); }
                 catch (Exception ex) { AdapterLogger.LogWarning(ex, "StopAsync threw."); }
             }
+
+            // Commands already running finish and send their results before the process goes,
+            // within the same deadline. They were abandoned mid-flight, and the host saw a broken
+            // stream where a drain had promised an answer.
+            var remaining = deadline - DateTime.UtcNow;
+            var commandsRunning = running.Values.Select(r => r.Task).Where(t => t != null).ToArray();
+            if (commandsRunning.Length > 0 && remaining > TimeSpan.Zero)
+                await Task.WhenAny(Task.WhenAll(commandsRunning), Task.Delay(remaining));
 
             stopping.Cancel();
         }
@@ -444,14 +517,18 @@ namespace SW.Serverless.Sdk.Resident
 
         // ------------------------------------------------------------------ outbound
 
-        /// <summary>Command results, pongs and events. Never dropped.</summary>
-        void Send(AdapterFrame frame) => priority.Writer.TryWrite(frame);
+        /// <summary>Command results, pongs and events. Never dropped while the stream is open.</summary>
+        void Send(AdapterFrame frame)
+        {
+            if (priority.Writer.TryWrite(frame)) outboundSignal.Release();
+            else Interlocked.Increment(ref droppedFrames);
+        }
 
         /// <summary>Logs and metrics. Dropped rather than allowed to block anything.</summary>
         void SendTelemetry(AdapterFrame frame)
         {
-            if (!telemetry.Writer.TryWrite(frame))
-                Interlocked.Increment(ref droppedFrames);
+            if (telemetry.Writer.TryWrite(frame)) outboundSignal.Release();
+            else Interlocked.Increment(ref droppedFrames);
         }
 
         /// <summary>
@@ -463,7 +540,9 @@ namespace SW.Serverless.Sdk.Resident
         {
             try
             {
-                while (!stopping.IsCancellationRequested)
+                // Runs until both channels are completed and empty — not until `stopping`, which
+                // fires before the final results of a drain have been written.
+                while (true)
                 {
                     while (priority.Reader.TryRead(out var urgent))
                         await stream.WriteAsync(urgent);
@@ -474,11 +553,10 @@ namespace SW.Serverless.Sdk.Resident
                         continue;
                     }
 
-                    var ready = await Task.WhenAny(
-                        priority.Reader.WaitToReadAsync(stopping.Token).AsTask(),
-                        telemetry.Reader.WaitToReadAsync(stopping.Token).AsTask());
+                    if (priority.Reader.Completion.IsCompleted && telemetry.Reader.Completion.IsCompleted)
+                        break;
 
-                    if (!await ready) break;
+                    await outboundSignal.WaitAsync();
                 }
             }
             catch (OperationCanceledException) { }
@@ -498,8 +576,11 @@ namespace SW.Serverless.Sdk.Resident
         public CancellationToken Stopping => stopping.Token;
         public AdapterLogLevel MinimumLogLevel { get; private set; } = AdapterLogLevel.Information;
 
+        /// <summary>The value the host sent, or the default declared with <c>Runner.Expect</c>.</summary>
         public string StartupValueOf(string name) =>
-            startupValues.TryGetValue(name, out var v) ? v : null;
+            startupValues.TryGetValue(name, out var v) ? v : Runner.ExpectedDefault(name);
+
+        public CancellationToken CallCancelled => callCancelled.Value;
 
         public IReadOnlyDictionary<string, string> InvocationValues => invocationValues.Value ?? Empty;
 
@@ -516,6 +597,11 @@ namespace SW.Serverless.Sdk.Resident
             IDictionary<string, string> headers = null, string contentType = null,
             CancellationToken cancellationToken = default)
         {
+            if (payload.Length > MaxPayloadBytes)
+                throw new ArgumentException(
+                    $"An event of {payload.Length} bytes is over the {MaxPayloadBytes}-byte limit; send it in parts.",
+                    nameof(payload));
+
             if (inFlight != null) await inFlight.WaitAsync(cancellationToken);
             try
             {
@@ -630,8 +716,8 @@ namespace SW.Serverless.Sdk.Resident
             var entry = new LogEntry
             {
                 Level = (int)level,
-                Message = message ?? "",
-                Exception = exception?.ToString() ?? "",
+                Message = Truncate(message),
+                Exception = Truncate(exception?.ToString()),
                 TimestampUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             };
             if (properties != null)
@@ -639,6 +725,9 @@ namespace SW.Serverless.Sdk.Resident
 
             SendTelemetry(new AdapterFrame { Log = entry });
         }
+
+        static string Truncate(string text) =>
+            text == null ? "" : text.Length <= MaxLogTextChars ? text : text[..MaxLogTextChars] + " …[truncated]";
 
         public void LogInformation(string message, IDictionary<string, string> properties = null) =>
             Log(AdapterLogLevel.Information, message, null, properties);
@@ -667,8 +756,14 @@ namespace SW.Serverless.Sdk.Resident
 
             foreach (var m in handlerType.GetMethods(BindingFlags.Instance | BindingFlags.Public))
             {
-                if (m.IsGenericMethod || m.GetParameters().Length > 1) continue;
-                if (m.DeclaringType == typeof(object) || skip.Contains(m.Name)) continue;
+                if (m.IsGenericMethod || m.DeclaringType == typeof(object) || skip.Contains(m.Name)) continue;
+
+                // One data argument at most, optionally followed by a CancellationToken.
+                var parameters = m.GetParameters();
+                var takesCancellation = parameters.Length > 0 &&
+                                        parameters[^1].ParameterType == typeof(CancellationToken);
+                var data = takesCancellation ? parameters[..^1] : parameters;
+                if (data.Length > 1) continue;
 
                 var returnsTask = m.ReturnType == typeof(Task);
                 var returnsTaskOf = m.ReturnType.IsGenericType &&
@@ -679,11 +774,18 @@ namespace SW.Serverless.Sdk.Resident
                 {
                     MethodInfo = m,
                     Void = returnsTask,
-                    ParameterType = m.GetParameters().Length == 1 ? m.GetParameters()[0].ParameterType : null
+                    ParameterType = data.Length == 1 ? data[0].ParameterType : null,
+                    TakesCancellation = takesCancellation
                 };
             }
             return map;
         }
+    }
+
+    sealed class RunningInvoke
+    {
+        public CancellationTokenSource Cancellation;
+        public Task Task;
     }
 
     static class Transport

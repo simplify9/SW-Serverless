@@ -13,12 +13,30 @@ namespace SW.Serverless.Sdk
 {
     public static class Runner
     {
-        public static string CorrelationId => startupValues[Constants.CorrelationIdName];
+        /// <summary>Null, rather than a KeyNotFoundException, when the host sent none.</summary>
+        public static string CorrelationId => StartupValueOf(Constants.CorrelationIdName);
         public static ServerlessOptions ServerlessOptions { get; private set; }
         public static IReadOnlyDictionary<string, string> AdapterValues { get; private set; }
 
 
         private static IReadOnlyDictionary<string, string> startupValues;
+
+        // Set when the adapter runs resident. These statics were the classic runner's alone, so an
+        // adapter moved to RunResident — "only this line differs" — threw NullReferenceException
+        // the first time it read a value the way it always had.
+        private static Func<string, string> residentValueOf;
+
+        internal static void UseResident(IReadOnlyDictionary<string, string> values,
+            IReadOnlyDictionary<string, string> adapterValues, Func<string, string> valueOf)
+        {
+            startupValues = values;
+            AdapterValues = adapterValues;
+            residentValueOf = valueOf;
+        }
+
+        /// <summary>The default declared with <see cref="Expect(string, string, bool, string)"/>, if any.</summary>
+        internal static string ExpectedDefault(string name) =>
+            expectedStartupValues.TryGetValue(name, out var expected) ? expected.Default : null;
 
         /// <summary>Everything the host sent, for binding into IConfiguration.</summary>
         public static IReadOnlyDictionary<string, string> StartupValues =>
@@ -125,7 +143,9 @@ namespace SW.Serverless.Sdk
                         idleTimer.Dispose();
 
                         if (input == Constants.QuitCommand) break;
-                        if (input == null) continue;
+                        // End of input: the host has gone. Reading again returns null at once, so
+                        // "continue" here spun a core at 100% forever in every orphaned adapter.
+                        if (input == null) break;
 
 
                         var inputSegments = input.Split(Constants.Delimiter);
@@ -291,19 +311,21 @@ namespace SW.Serverless.Sdk
             });
         }
 
+        /// <summary>
+        /// The value the host sent, or the declared default. Under the resident runner this is the
+        /// current call's value first — the same precedence as <c>IAdapterContext.ValueOf</c>.
+        /// </summary>
         public static string StartupValueOf(string name)
         {
-            startupValues.TryGetValue(name, out string value);
-            if (value == null && expectedStartupValues.TryGetValue(name, out var startupValue))
-                value = startupValue.Default;
-            return value;
+            string value = null;
+            if (residentValueOf != null) value = residentValueOf(name);
+            else startupValues?.TryGetValue(name, out value);
+            return value ?? ExpectedDefault(name);
         }
 
         public static T StartupValueOf<T>(string name)
         {
-            startupValues.TryGetValue(name, out string value);
-            if (value == null && expectedStartupValues.TryGetValue(name, out var startupValue))
-                value = startupValue.Default;
+            var value = StartupValueOf(name);
             if (value != null)
                 return (T)value.ConvertValueToType(typeof(T));
             return default;

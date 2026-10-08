@@ -49,12 +49,18 @@ namespace SW.Serverless.Resident
 
         /// <summary>
         /// How long a pooled resident instance may sit checked-in and unused before the pool
-        /// retires it, letting the warm set shrink back down. Zero (the default) disables idle
-        /// eviction — a pool trading memory for a guaranteed-warm next call is often exactly what
-        /// pooling is for. Applies only to pooled ("Poolable") adapters (<see cref="AdapterPool"/>);
+        /// retires it, letting the warm set shrink back down. Ten minutes by default: every
+        /// distinct configuration is its own pool, and with no timeout each one kept its warm
+        /// processes for the life of the host. Zero disables idle eviction. Applies only to pooled ("Poolable") adapters (<see cref="AdapterPool"/>);
         /// exclusive instances (broker connections, etc.) are never evicted for idling. An adapter
         /// can override this via the "IdleTimeoutSeconds" adapter-metadata value.
         /// </summary>
-        public TimeSpan IdleTimeout { get; set; } = TimeSpan.Zero;
+        public TimeSpan IdleTimeout { get; set; } = TimeSpan.FromMinutes(10);
+
+        /// <summary>
+        /// How long an adapter asked to drain — at its soft memory or CPU ceiling — has to exit
+        /// before it is killed. Without one, an adapter that ignored the request was never checked again.
+        /// </summary>
+        public TimeSpan DrainDeadline { get; set; } = TimeSpan.FromSeconds(60);
     }
 }

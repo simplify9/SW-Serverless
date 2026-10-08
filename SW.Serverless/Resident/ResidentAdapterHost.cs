@@ -156,11 +156,21 @@ namespace SW.Serverless.Resident
             await gate.WaitAsync(cancellationToken);
             try
             {
-                if (instances.TryGetValue(key, out var existing) &&
-                    existing.Instance?.State == InstanceState.Ready)
-                    return existing.Instance;
+                var supervised = Supervised.For(key, spec);
+                if (instances.TryGetValue(key, out var existing))
+                {
+                    if (existing.Instance?.State == InstanceState.Ready)
+                        return existing.Instance;
 
-                var supervised = new Supervised { Spec = spec };
+                    // Waiting out a crash backoff, draining, or left behind by a start that timed
+                    // out. Stopped before the new one exists, so its pending restart can't bring a
+                    // second process up beside this one — two consumers on the customer's queue.
+                    // Its crash history carries over, so asking again doesn't wipe the quarantine
+                    // count the restarts were building.
+                    await StopSupervisedAsync(existing, drain: false);
+                    supervised.InheritHistory(existing);
+                }
+
                 instances[key] = supervised;
                 await SpawnAsync(supervised, cancellationToken);
                 return supervised.Instance;
@@ -174,6 +184,13 @@ namespace SW.Serverless.Resident
         async Task SpawnAsync(Supervised supervised, CancellationToken cancellationToken)
         {
             var spec = supervised.Spec;
+
+            // From what the caller asked for, not from what the previous launch resolved to. The
+            // resolved path used to be written back and reused, so a restart after a newer version
+            // was published (which prunes the old directory) found nothing to start and gave up.
+            spec.EntryAssemblyPath = supervised.RequestedEntryAssemblyPath;
+            spec.Executable = supervised.RequestedExecutable;
+            spec.AdapterValues = supervised.RequestedAdapterValues;
 
             // Resolves an explicit path, or installs from cloud storage — which is what makes
             // "add a provider without redeploying" real (design doc 15.2).
@@ -198,6 +215,10 @@ namespace SW.Serverless.Resident
             supervised.Instance = instance;
             registry.Expect(instance);
 
+            // Held for the life of the process, so pruning an older version can't delete it.
+            instance.DirectoryLease = AdapterDirectoryLeases.Hold(
+                resolved.Directory ?? Path.GetDirectoryName(resolved.EntryAssemblyPath));
+
             try
             {
                 instance.Process = launcher.Launch(spec, instance);
@@ -206,6 +227,8 @@ namespace SW.Serverless.Resident
             {
                 // Otherwise the registry keeps waiting for a child that will never attach.
                 registry.Forget(instance.Token);
+                instance.Abandoned = true;
+                await instance.DisposeAsync();
                 throw;
             }
 
@@ -222,7 +245,15 @@ namespace SW.Serverless.Resident
             {
                 registry.Forget(instance.Token);
                 var tail = string.Join("\n", instance.Diagnostics.TakeLast(20));
+
+                // Killed by this method, not crashed: without the mark, its exit scheduled a
+                // background restart while the caller was told the start had failed — and a
+                // caller that tried again then had two.
+                instance.Abandoned = true;
                 TryKill(instance.Process);
+                await instance.DisposeAsync();
+
+                if (cancellationToken.IsCancellationRequested) throw;
                 throw new TimeoutException(
                     $"Adapter '{spec.AdapterId}' did not attach within {options.HandshakeTimeout}." +
                     (string.IsNullOrWhiteSpace(tail) ? "" : $" Last output:\n{tail}"));
@@ -231,6 +262,7 @@ namespace SW.Serverless.Resident
 
         void OnExited(Supervised supervised, ResidentAdapterInstance instance)
         {
+            if (instance.Abandoned) return;
             if (stopping.IsCancellationRequested || supervised.Stopping) return;
             if (!ReferenceEquals(supervised.Instance, instance)) return;
 
@@ -239,9 +271,17 @@ namespace SW.Serverless.Resident
                 instance.AdapterId, instance.InstanceKey, code,
                 string.Join("\n", instance.Diagnostics.TakeLast(20)));
 
-            supervised.RecordCrash(options);
+            // An exit the host asked for — a drain at the soft memory or CPU ceiling — is not a
+            // crash, and counting it quarantined busy, healthy adapters. A long healthy run before
+            // a crash starts the count again, so backoff does not stay at its ceiling for good.
+            var requested = supervised.DrainRequested;
+            if (DateTimeOffset.UtcNow - instance.StartedOn >= HealthyRunResetsHistory)
+                supervised.ResetHistory();
+            if (!requested) supervised.RecordCrash(options);
+
             supervised.MissedHeartbeats = 0;
             supervised.DrainRequested = false;
+            supervised.DrainRequestedOn = null;
             supervised.LastCpuSampleOn = null;
             supervised.CpuOverSamples = 0;
             _ = instance.DisposeAsync().AsTask();
@@ -255,21 +295,74 @@ namespace SW.Serverless.Resident
                 return;
             }
 
+            ScheduleRestart(supervised, requested ? TimeSpan.FromSeconds(1) : Backoff(supervised));
+        }
+
+        /// <summary>A run this long before a crash means the crashes before it are history.</summary>
+        static readonly TimeSpan HealthyRunResetsHistory = TimeSpan.FromHours(1);
+
+        static TimeSpan Backoff(Supervised supervised) =>
+            TimeSpan.FromSeconds(Math.Min(60, Math.Pow(2, Math.Min(6, supervised.RestartCount))));
+
+        /// <summary>
+        /// Restarts <paramref name="supervised"/> after <paramref name="delay"/>, unless it has been
+        /// stopped or replaced by then. A failed relaunch is retried with backoff rather than logged
+        /// once and abandoned, which left an integration silently dead with nothing to notice it.
+        /// </summary>
+        void ScheduleRestart(Supervised supervised, TimeSpan delay)
+        {
+            var restart = CancellationTokenSource.CreateLinkedTokenSource(stopping.Token);
+            Interlocked.Exchange(ref supervised.PendingRestart, restart)?.Cancel();
+
             _ = Task.Run(async () =>
             {
-                var delay = TimeSpan.FromSeconds(Math.Min(60, Math.Pow(2, Math.Min(6, supervised.RestartCount))));
                 try
                 {
-                    await Task.Delay(delay, stopping.Token);
-                    await SpawnAsync(supervised, stopping.Token);
+                    await Task.Delay(delay, restart.Token);
+                    if (!IsCurrent(supervised)) return;
+
+                    await SpawnAsync(supervised, restart.Token);
+
+                    // Stopped while the launch was under way: the new process is nobody's.
+                    if (!IsCurrent(supervised))
+                    {
+                        var orphan = supervised.Instance;
+                        if (orphan != null)
+                        {
+                            orphan.Abandoned = true;
+                            TryKill(orphan.Process);
+                            await orphan.DisposeAsync();
+                        }
+                    }
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Restart of {AdapterId} failed.", instance.AdapterId);
+                    if (restart.IsCancellationRequested || !IsCurrent(supervised)) return;
+
+                    supervised.RecordCrash(options);
+                    if (supervised.Quarantined)
+                    {
+                        supervised.Instance?.MarkQuarantined();
+                        logger.LogError(ex,
+                            "Adapter {AdapterId}/{InstanceKey} could not be restarted {Count} times in {Window}. Quarantined.",
+                            supervised.Spec.AdapterId, supervised.Spec.InstanceKey, supervised.RestartCount,
+                            options.CrashLoopWindow);
+                        return;
+                    }
+
+                    logger.LogError(ex, "Restart of {AdapterId}/{InstanceKey} failed; trying again.",
+                        supervised.Spec.AdapterId, supervised.Spec.InstanceKey);
+                    ScheduleRestart(supervised, Backoff(supervised));
                 }
             });
         }
+
+        /// <summary>Still registered under its key, and not being stopped.</summary>
+        bool IsCurrent(Supervised supervised) =>
+            !supervised.Stopping &&
+            instances.TryGetValue(supervised.Key, out var current) &&
+            ReferenceEquals(current, supervised);
 
         public Task<LimitUpdate> UpdateLimitsAsync(string adapterId, string instanceKey,
             ResourceLimits limits, CancellationToken cancellationToken = default)
@@ -324,6 +417,7 @@ namespace SW.Serverless.Resident
             // Stopping is set for the teardown so the exit does not look like a crash and trigger
             // the backoff restart; this method does the relaunch itself.
             supervised.Stopping = true;
+            Interlocked.Exchange(ref supervised.PendingRestart, null)?.Cancel();
             try
             {
                 var old = supervised.Instance;
@@ -367,6 +461,8 @@ namespace SW.Serverless.Resident
         async Task StopSupervisedAsync(Supervised supervised, bool drain)
         {
             supervised.Stopping = true;
+            // A crash backoff in progress would otherwise relaunch it after it was stopped.
+            Interlocked.Exchange(ref supervised.PendingRestart, null)?.Cancel();
             var instance = supervised.Instance;
             if (instance == null) return;
 
@@ -394,9 +490,23 @@ namespace SW.Serverless.Resident
             // connection string and the credentials live. Keying on the id alone therefore handed
             // the second data source a process connected as the first one: every later renter of
             // that adapter silently ran against the wrong system.
-            var pool = pools.GetOrAdd(PoolKeyOf(spec),
-                _ => new AdapterPool(spec, this, options, loggerFactory.CreateLogger<AdapterPool>()));
-            return pool.RentAsync(cancellationToken);
+            return RentFromPoolAsync(spec, cancellationToken);
+        }
+
+        async Task<IAdapterLease> RentFromPoolAsync(AdapterSpec spec, CancellationToken cancellationToken)
+        {
+            var poolKey = PoolKeyOf(spec);
+            while (true)
+            {
+                var pool = pools.GetOrAdd(poolKey,
+                    key => new AdapterPool(spec, key, this, options, loggerFactory.CreateLogger<AdapterPool>()));
+
+                // Null when the pool was emptied and closed between the lookup and the rent; the
+                // next lookup creates a fresh one.
+                var lease = await pool.RentAsync(cancellationToken);
+                if (lease != null) return lease;
+                pools.TryRemove(new KeyValuePair<string, AdapterPool>(poolKey, pool));
+            }
         }
 
         /// <summary>
@@ -424,12 +534,24 @@ namespace SW.Serverless.Resident
         internal async Task<ResidentAdapterInstance> SpawnPooledAsync(AdapterSpec spec, string slot,
             CancellationToken ct)
         {
-            var supervised = new Supervised { Spec = CloneWithKey(spec, slot) };
-            instances[Key(spec.AdapterId, slot)] = supervised;
+            var key = Key(spec.AdapterId, slot);
+            var supervised = Supervised.For(key, CloneWithKey(spec, slot));
+            instances[key] = supervised;
 
             // ContinueWith swallowed the failure and handed back a null instance, so the caller
             // got a NullReferenceException instead of the reason the spawn failed.
-            await SpawnAsync(supervised, ct);
+            try
+            {
+                await SpawnAsync(supervised, ct);
+            }
+            catch
+            {
+                // Not left registered: nothing owns a slot whose spawn failed, so it would never
+                // be retired, and nothing should restart it either.
+                if (instances.TryRemove(new KeyValuePair<string, Supervised>(key, supervised)))
+                    await StopSupervisedAsync(supervised, drain: false);
+                throw;
+            }
             return supervised.Instance;
         }
 
@@ -488,7 +610,9 @@ namespace SW.Serverless.Resident
                 CommandDetails = instance.CommandDetails,
                 SdkVersion = instance.SdkVersion,
                 ProtocolVersion = instance.ProtocolVersion,
-                StartupValues = instance.StartupValues,
+                // Names only. These are connection strings and passwords, and health is what gets
+                // shown on screens and serialised into logs.
+                StartupValues = instance.StartupValues?.ToDictionary(kv => kv.Key, _ => "********"),
                 Diagnostics = instance.Diagnostics
             };
 
@@ -524,15 +648,48 @@ namespace SW.Serverless.Resident
                 // Concurrently: sequential pings meant one wedged adapter delayed detection for
                 // every adapter behind it in the loop, so a whole node could look healthy because
                 // the first instance was hanging.
-                await Task.WhenAll(instances.Values.ToArray().Select(HeartbeatAsync));
-                await Task.WhenAll(pools.Values.ToArray().Select(p => p.EvictIdleAsync()));
+                // One bad sweep must not end supervision of the whole node.
+                try
+                {
+                    await Task.WhenAll(instances.Values.ToArray().Select(HeartbeatAsync));
+                    await Task.WhenAll(pools.Values.ToArray().Select(p => p.EvictIdleAsync()));
+
+                    // Every distinct configuration is its own pool, so pools that have shed their
+                    // last instance are dropped rather than kept for the life of the process.
+                    foreach (var (key, pool) in pools.ToArray())
+                        if (pool.TryClose())
+                            pools.TryRemove(new KeyValuePair<string, AdapterPool>(key, pool));
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Supervisor sweep failed.");
+                }
             }
         }
 
         async Task HeartbeatAsync(Supervised supervised)
         {
             var instance = supervised.Instance;
-            if (instance == null || instance.State != InstanceState.Ready) return;
+            if (instance == null) return;
+
+            // Draining is still supervised. An adapter asked to drain at its soft ceiling that
+            // never exits used to escape every check from that moment on — the hard ceiling
+            // included — until the node itself ran out of memory.
+            if (instance.State == InstanceState.Draining)
+            {
+                SampleProcess(supervised, instance);
+                if (supervised.DrainRequestedOn.HasValue &&
+                    DateTimeOffset.UtcNow - supervised.DrainRequestedOn.Value > options.DrainDeadline)
+                {
+                    logger.LogWarning("Adapter {AdapterId}/{InstanceKey} did not exit within {Deadline} of being asked to drain; killing.",
+                        instance.AdapterId, instance.InstanceKey, options.DrainDeadline);
+                    supervised.DrainRequestedOn = null;
+                    TryKill(instance.Process);   // Exited handler restarts it
+                }
+                return;
+            }
+
+            if (instance.State != InstanceState.Ready) return;
 
             // Host-observed metrics need no adapter cooperation, so they still work when the
             // adapter is wedged (design doc 6.3).
@@ -604,6 +761,7 @@ namespace SW.Serverless.Resident
                     if (supervised.CpuOverSamples >= cpuSamples && !supervised.DrainRequested)
                     {
                         supervised.DrainRequested = true;
+                        supervised.DrainRequestedOn = DateTimeOffset.UtcNow;
                         supervised.CpuOverSamples = 0;
                         logger.LogWarning(
                             "Adapter {AdapterId}/{InstanceKey} held {Cpu}% CPU across {Samples} samples (limit {Limit}%); asking it to drain.",
@@ -617,6 +775,7 @@ namespace SW.Serverless.Resident
                 if (soft > 0 && rss > soft && !supervised.DrainRequested)
                 {
                     supervised.DrainRequested = true;
+                    supervised.DrainRequestedOn = DateTimeOffset.UtcNow;
                     logger.LogWarning("Adapter {AdapterId}/{InstanceKey} at {Rss} MB crossed the soft limit; asking it to drain.",
                         instance.AdapterId, instance.InstanceKey, rss / 1024 / 1024);
                     instance.RequestShutdown("soft memory limit", drain: true);
@@ -643,7 +802,39 @@ namespace SW.Serverless.Resident
 
         internal class Supervised
         {
+            public string Key;
             public AdapterSpec Spec;
+
+            // What the caller asked for. SpawnAsync resolves into Spec on every launch, so these
+            // keep the request itself — see SpawnAsync.
+            public string RequestedEntryAssemblyPath;
+            public string RequestedExecutable;
+            public IDictionary<string, string> RequestedAdapterValues;
+
+            public CancellationTokenSource PendingRestart;
+            public DateTimeOffset? DrainRequestedOn;
+
+            public static Supervised For(string key, AdapterSpec spec) => new()
+            {
+                Key = key,
+                Spec = spec,
+                RequestedEntryAssemblyPath = spec.EntryAssemblyPath,
+                RequestedExecutable = spec.Executable,
+                RequestedAdapterValues = spec.AdapterValues
+            };
+
+            public void InheritHistory(Supervised previous)
+            {
+                RestartCount = previous.RestartCount;
+                lock (previous.crashes) crashes.AddRange(previous.crashes);
+            }
+
+            public void ResetHistory()
+            {
+                RestartCount = 0;
+                lock (crashes) crashes.Clear();
+            }
+
             public ResidentAdapterInstance Instance;
             public int RestartCount;
             public int MissedHeartbeats;
@@ -665,9 +856,12 @@ namespace SW.Serverless.Resident
             {
                 RestartCount++;
                 var now = DateTimeOffset.UtcNow;
-                crashes.Add(now);
-                crashes.RemoveAll(c => now - c > options.CrashLoopWindow);
-                if (crashes.Count >= options.CrashLoopThreshold) Quarantined = true;
+                lock (crashes)
+                {
+                    crashes.Add(now);
+                    crashes.RemoveAll(c => now - c > options.CrashLoopWindow);
+                    if (crashes.Count >= options.CrashLoopThreshold) Quarantined = true;
+                }
             }
         }
     }
