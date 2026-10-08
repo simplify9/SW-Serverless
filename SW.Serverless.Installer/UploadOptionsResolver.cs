@@ -29,6 +29,7 @@ namespace SW.Serverless.Installer
             [Env.GcClientEmail] = "Google Cloud client_email",
             [Env.GcClientId] = "Google Cloud client_id",
             [Env.GcClientX509CertUrl] = "Google Cloud client_x509_cert_url",
+            [Env.PublishedBy] = "Who is publishing, recorded in the catalog (then GITHUB_ACTOR, then the user name)",
         };
 
         public static class Env
@@ -45,13 +46,15 @@ namespace SW.Serverless.Installer
             public const string GcClientEmail = "SWSL_GC_CLIENT_EMAIL";
             public const string GcClientId = "SWSL_GC_CLIENT_ID";
             public const string GcClientX509CertUrl = "SWSL_GC_CLIENT_X509_CERT_URL";
+            public const string PublishedBy = "SWSL_PUBLISHED_BY";
+            public const string GitHubActor = "GITHUB_ACTOR";
         }
 
-        /// <param name="options">The parsed command line.</param>
+        /// <param name="options">The parsed command line: a publish, or one of the commands that only needs the store.</param>
         /// <param name="configJson">The contents of the -c file, or null when none was given.</param>
         /// <param name="environment">Reads an environment variable; null for the process environment.</param>
         public static ServerlessUploadOptions Resolve(
-            CliOptions options, string configJson, Func<string, string> environment = null)
+            StorageCliOptions options, string configJson, Func<string, string> environment = null)
         {
             environment ??= Environment.GetEnvironmentVariable;
 
@@ -69,11 +72,13 @@ namespace SW.Serverless.Installer
             string Pick(string flag, string fromFile, string envName) =>
                 FirstSet(flag, fromFile, envName == null ? null : environment(envName));
 
+            var publish = options as CliOptions;
+
             return new ServerlessUploadOptions
             {
-                Version = options.Version,
-                AdapterId = options.AdapterId,
-                Kind = options.Kind,
+                Version = publish?.Version,
+                AdapterId = publish?.AdapterId,
+                Kind = publish?.Kind,
 
                 Provider = Pick(options.Provider, file?.Provider, Env.Provider),
                 AccessKeyId = Pick(options.AccessKeyId, file?.AccessKeyId, Env.AccessKey),
@@ -98,6 +103,16 @@ namespace SW.Serverless.Installer
                 ClientId = Pick(null, file?.ClientId, Env.GcClientId),
                 ClientX509CertUrl = Pick(null, file?.ClientX509CertUrl, Env.GcClientX509CertUrl),
             };
+        }
+
+        /// <summary>
+        /// Who a version is recorded as published by. Informational only — nothing is authorised
+        /// by it — so it falls back as far as the user name rather than failing a publish.
+        /// </summary>
+        public static string ResolvePublishedBy(string flag, Func<string, string> environment = null)
+        {
+            environment ??= Environment.GetEnvironmentVariable;
+            return FirstSet(flag, environment(Env.PublishedBy), environment(Env.GitHubActor), Environment.UserName);
         }
 
         private static string FirstSet(params string[] values)

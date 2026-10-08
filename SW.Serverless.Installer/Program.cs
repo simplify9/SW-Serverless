@@ -1,6 +1,9 @@
 using CommandLine;
+using SW.PrimitiveTypes;
+using SW.Serverless.Contract.Catalog;
 using SW.Serverless.Installer.Shared;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -11,6 +14,9 @@ namespace SW.Serverless.Installer
     {
         public const int Success = 0;
         public const int Failure = 1;
+
+        /// <summary>The commands besides publishing. Matched on the first argument only.</summary>
+        static readonly HashSet<string> Commands = new(StringComparer.Ordinal) { "promote", "versions", "withdraw" };
 
         private static Task<int> Main(string[] args) => RunAsync(args);
 
@@ -28,14 +34,35 @@ namespace SW.Serverless.Installer
                 s.HelpWriter = Console.Error;
                 s.AutoVersion = false;
             });
-            var result = parser.ParseArguments<CliOptions>(args);
 
-            if (result is Parsed<CliOptions> parsed)
-                return await RunOptions(parsed.Value, environment);
+            // A command is recognised before the publish parser sees anything, so every existing
+            // "serverless <project> <id>" line parses exactly as before. A project file that happens
+            // to be called "promote" is still a project.
+            if (args.Length > 0 && Commands.Contains(args[0]) && !File.Exists(args[0]))
+            {
+                var rest = args[1..];
+                return args[0] switch
+                {
+                    "promote" => await Run(parser.ParseArguments<PromoteCliOptions>(rest),
+                        o => Promote(o, environment)),
+                    "versions" => await Run(parser.ParseArguments<VersionsCliOptions>(rest),
+                        o => Versions(o, environment)),
+                    _ => await Run(parser.ParseArguments<WithdrawCliOptions>(rest),
+                        o => Withdraw(o, environment)),
+                };
+            }
+
+            return await Run(parser.ParseArguments<CliOptions>(args), o => RunOptions(o, environment));
+        }
+
+        static async Task<int> Run<T>(ParserResult<T> result, Func<T, Task<int>> run)
+        {
+            if (result is Parsed<T> parsed)
+                return await run(parsed.Value);
 
             // --help and --version are reported by the parser as "errors", but asking for them is
             // not a failure.
-            var errors = ((NotParsed<CliOptions>)result).Errors;
+            var errors = ((NotParsed<T>)result).Errors;
             return errors.All(e => e.Tag is ErrorType.HelpRequestedError or ErrorType.VersionRequestedError
                     or ErrorType.HelpVerbRequestedError)
                 ? Success
@@ -43,7 +70,7 @@ namespace SW.Serverless.Installer
         }
 
         private static async Task<ServerlessUploadOptions> GetServerlessUploadOptions(
-            CliOptions options, Func<string, string> environment)
+            StorageCliOptions options, Func<string, string> environment)
         {
             var configJson = string.IsNullOrWhiteSpace(options.CloudFilesConfigPath)
                 ? null
@@ -74,6 +101,12 @@ namespace SW.Serverless.Installer
                     return Failure;
                 }
 
+                if (opts.NoPromote && string.IsNullOrWhiteSpace(opts.Version))
+                {
+                    Console.WriteLine("--no-promote needs -v: an unversioned upload always replaces what runs.");
+                    return Failure;
+                }
+
                 var uploadOptions = await GetServerlessUploadOptions(opts, environment);
                 var installer = new InstallerLogic();
 
@@ -85,25 +118,41 @@ namespace SW.Serverless.Installer
                 var entryAssembly = InstallerLogic.ResolveEntryAssembly(publishPath, opts.ProjectPath);
                 if (entryAssembly == null) return Failure;
 
-                // Beside the published output rather than inside it, so it is never zipped into
-                // itself and an adapter id cannot collide with a published file.
-                var zipFileName = Path.Combine(tempPath, "adapter.zip");
+                Console.WriteLine("Starting...");
+                var files = CloudFilesFactory.Create(uploadOptions);
 
-                if (!installer.Compress(publishPath, zipFileName)) return Failure;
+                await PackagePublisher.PublishAsync(files, new PublishRequest
+                {
+                    AdapterId = opts.AdapterId,
+                    ProjectPath = opts.ProjectPath,
+                    PublishPath = publishPath,
+                    EntryAssembly = entryAssembly,
+                    // Beside the published output rather than inside it, so it is never zipped into
+                    // itself and an adapter id cannot collide with a published file.
+                    WorkPath = tempPath,
+                    Version = opts.Version,
+                    Promote = !opts.NoPromote,
+                    Probe = !opts.NoProbe,
+                    // An explicit --kind wins, for an adapter whose author has not declared one.
+                    Kind = opts.Kind?.Trim(),
+                    ReleaseNotes = opts.Notes,
+                    PublishedBy = UploadOptionsResolver.ResolvePublishedBy(opts.PublishedBy, environment),
+                });
 
-                // Read from the published assembly rather than asked for: the lifecycle is a fact
-                // about the code, and a host that has to be told it separately will eventually be
-                // told wrong — which is how a resident adapter ends up offered somewhere only a
-                // classic one can run.
-                var description = AdapterDescriber.Describe(publishPath, entryAssembly);
-
-                // An explicit --kind wins, for an adapter whose author has not declared one.
-                if (!string.IsNullOrWhiteSpace(opts.Kind)) description.Kind = opts.Kind.Trim();
-
-                if (!await installer.PushToCloud(zipFileName, entryAssembly, uploadOptions, description))
-                    return Failure;
-
+                Console.WriteLine("Pushing to cloud succeeded.");
                 return Success;
+            }
+            catch (SWException ex)
+            {
+                // A problem the user can fix: the message says what, a stack trace would bury it.
+                Console.WriteLine(ex.Message);
+                return Failure;
+            }
+            catch (ArgumentException ex)
+            {
+                // Semver's verdicts: an existing or lower version, or an unknown bump.
+                Console.WriteLine(ex.Message);
+                return Failure;
             }
             catch (Exception ex)
             {
@@ -114,6 +163,81 @@ namespace SW.Serverless.Installer
             {
                 // A failed build or upload must not leave a copy of the adapter in the temp folder.
                 if (tempPath != null) new InstallerLogic().Cleanup(tempPath);
+            }
+        }
+
+        // ---------------------------------------------------------------- commands
+
+        static Task<int> Promote(PromoteCliOptions opts, Func<string, string> environment) =>
+            WithRepository(opts, opts.AdapterId, environment, async (repository, id) =>
+            {
+                var work = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+                try
+                {
+                    await repository.PromoteAsync(id, opts.Version?.Trim(), work);
+                }
+                finally
+                {
+                    new InstallerLogic().Cleanup(work);
+                }
+            });
+
+        static Task<int> Withdraw(WithdrawCliOptions opts, Func<string, string> environment) =>
+            WithRepository(opts, opts.AdapterId, environment,
+                (repository, id) => repository.WithdrawAsync(id, opts.Version?.Trim()));
+
+        static Task<int> Versions(VersionsCliOptions opts, Func<string, string> environment) =>
+            WithRepository(opts, opts.AdapterId, environment, async (repository, id) =>
+            {
+                var listing = await repository.ListVersionsAsync(id);
+                foreach (var line in FormatVersions(id, listing)) Console.WriteLine(line);
+            });
+
+        static async Task<int> WithRepository(StorageCliOptions opts, string adapterId,
+            Func<string, string> environment, Func<AdapterRepository, string, Task> action)
+        {
+            try
+            {
+                var id = adapterId?.ToLowerInvariant();
+                if (!InstallerLogic.IsValidAdapterId(id))
+                {
+                    Console.WriteLine($"Invalid adapter id '{adapterId}'.");
+                    return Failure;
+                }
+
+                var files = CloudFilesFactory.Create(await GetServerlessUploadOptions(opts, environment));
+                await action(new AdapterRepository(files), id);
+                return Success;
+            }
+            catch (SWException ex)
+            {
+                Console.WriteLine(ex.Message);
+                return Failure;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
+                return Failure;
+            }
+        }
+
+        public static IEnumerable<string> FormatVersions(string adapterId, VersionListing listing)
+        {
+            if (listing.Versions.Count == 0)
+            {
+                yield return $"'{adapterId}' has no published versions.";
+                yield break;
+            }
+
+            yield return $"{adapterId}: current {listing.Current ?? "(unversioned package)"}" +
+                         (listing.FromCatalog ? "" : "  — no catalog entry; read from the packages");
+            yield return $"  {"VERSION",-18} {"PUBLISHED (UTC)",-17} {"BY",-20} {"SHA256",-12}";
+            foreach (var row in Enumerable.Reverse(listing.Versions))
+            {
+                yield return $"{(row.Current ? "*" : " ")} {row.Version,-18} " +
+                             $"{row.PublishedOn?.UtcDateTime.ToString("yyyy-MM-dd HH:mm") ?? "",-17} " +
+                             $"{row.PublishedBy ?? "",-20} {AdapterRepository.Short(row.Sha256),-12}" +
+                             (row.Withdrawn ? " withdrawn" : "");
             }
         }
     }

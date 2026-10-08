@@ -22,5 +22,16 @@
 
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The manifest and catalog model, so what the installer writes is exactly what hosts and
+         Bitween read. -->
+    <ProjectReference Include="..\SW.Serverless.Contract\SW.Serverless.Contract.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SW.Serverless.Installer.UnitTests" />
+    <InternalsVisibleTo Include="SW.Serverless.CompatibilityTests" />
+  </ItemGroup>
+
 
 </Project>

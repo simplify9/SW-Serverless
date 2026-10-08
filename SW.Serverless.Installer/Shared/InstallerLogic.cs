@@ -214,23 +214,6 @@ namespace SW.Serverless.Installer.Shared
         }
 
         /// <summary>
-        /// What every uploaded adapter carries. Kind and Lifecycle are new, and both are written
-        /// even when empty so a host can tell "this adapter declared nothing" from "this adapter
-        /// predates the field" — the second still needs the old naming convention to classify it.
-        /// Sha256 is the hex digest of the zip, for a runtime to check what it downloaded.
-        /// </summary>
-        private static Dictionary<string, string> BuildMetadata(
-            string entryAssembly, AdapterDescription description, string sha256) => new()
-        {
-            { "EntryAssembly", entryAssembly },
-            { "Lang", "dotnet" },
-            { "Timestamp", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") },
-            { "Lifecycle", description?.Lifecycle ?? AdapterDescription.ClassicLifecycle },
-            { "Kind", description?.Kind ?? "" },
-            { "Sha256", sha256 },
-        };
-
-        /// <summary>
         /// The version names already published under <paramref name="dir"/>. Listed WITH the
         /// trailing slash, so publishing "foo" does not count the versions of "foo-bar", and
         /// limited to direct children of the folder.
@@ -243,83 +226,6 @@ namespace SW.Serverless.Installer.Shared
                 .Select(k => k[prefix.Length..])
                 .Where(name => name.Length > 0 && !name.Contains('/'))
                 .ToList();
-        }
-
-        private static async Task UploadVersioned(ICloudFilesService cloudService, Stream zipFileStream,
-            string adapterId,
-            string entryAssembly, string version, AdapterDescription description, string sha256)
-        {
-            var dir = $"adapters/{adapterId}".ToLower();
-            var list = await cloudService.ListAsync($"{dir}/");
-            var fileName = Semver.GetNewVersion(version, ExistingVersions(dir, list.Select(i => i.Key)));
-            var path = $"{dir}/{fileName}";
-            Console.WriteLine($"Uploading to {path} Versioned");
-            await cloudService.WriteAsync(zipFileStream, new WriteFileSettings
-            {
-                ContentType = "application/zip",
-                Key = path,
-                Metadata = BuildMetadata(entryAssembly, description, sha256)
-            });
-        }
-
-        private static async Task UploadLegacy(ICloudFilesService cloudService, Stream zipFileStream, string adapterId,
-            string entryAssembly, AdapterDescription description, string sha256)
-        {
-            var path = $"adapters/{adapterId}".ToLower();
-            Console.WriteLine($"Uploading to {path}");
-            await cloudService.WriteAsync(zipFileStream, new WriteFileSettings
-            {
-                ContentType = "application/zip",
-                Key = path,
-                Metadata = BuildMetadata(entryAssembly, description, sha256)
-            });
-        }
-
-        public async Task<bool> PushToCloud(
-            string zipFilePath,
-            string entryAssembly,
-            ServerlessUploadOptions options,
-            AdapterDescription description = null)
-        {
-            try
-            {
-                if (!IsValidAdapterId(options.AdapterId?.ToLowerInvariant()))
-                    throw new SWException(
-                        $"Invalid adapter id '{options.AdapterId}'. Use lowercase letters, digits, '.', '_' and '-'.");
-
-                Console.WriteLine("Starting...");
-                var cloudService = CloudFilesFactory.Create(options);
-                Console.WriteLine("Reading file...");
-
-                var sha256 = Sha256Of(zipFilePath);
-                await using var zipFileStream = File.OpenRead(zipFilePath);
-                Console.WriteLine("Pushing to cloud...");
-
-                description ??= new AdapterDescription();
-                Console.WriteLine(
-                    $"Lifecycle: {description.Lifecycle}"
-                    + (string.IsNullOrEmpty(description.Kind) ? "" : $", kind: {description.Kind}")
-                    + $", sha256: {sha256}");
-
-                if (string.IsNullOrWhiteSpace(options.Version))
-                {
-                    await UploadLegacy(cloudService, zipFileStream, options.AdapterId, entryAssembly,
-                        description, sha256);
-                }
-                else
-                {
-                    await UploadVersioned(cloudService, zipFileStream, options.AdapterId, entryAssembly,
-                        options.Version, description, sha256);
-                }
-
-                Console.WriteLine("Pushing to cloud succeeded.");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Pushing to cloud failed: {ex}");
-                return false;
-            }
         }
 
         public bool Cleanup(string tempPath)

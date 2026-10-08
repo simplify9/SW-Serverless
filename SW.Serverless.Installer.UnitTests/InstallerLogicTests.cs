@@ -345,42 +345,44 @@ public class PackagingTests
         var zip = Path.Combine(root, "adapter.zip");
         Assert.IsTrue(new InstallerLogic().Compress(publish, zip));
 
-        ServerlessUploadOptions Options(string id, string version) => new()
+        var store = CloudFilesFactory.Create(new ServerlessUploadOptions
         {
             Provider = "local",
             BucketName = "bucket",
             ServiceUrl = Path.Combine(root, "store"),
-            AdapterId = id,
-            Version = version,
-        };
+        });
+        var repository = new AdapterRepository(store);
+        var package = new PackageInfo { EntryAssembly = "Adapter.dll" };
 
-        var installer = new InstallerLogic();
-        Assert.IsTrue(await installer.PushToCloud(zip, "Adapter.dll", Options("foobar", "5.0.0")));
-        Assert.IsTrue(await installer.PushToCloud(zip, "Adapter.dll", Options("foo", "patch")));
-        Assert.IsTrue(await installer.PushToCloud(zip, "Adapter.dll", Options("foo", "patch")));
+        async Task Push(string id, string mode) =>
+            await repository.PublishVersionAsync(id, await repository.ResolveVersionAsync(id, mode), zip, package,
+                promote: true, publishedBy: "test");
 
-        var store = CloudFilesFactory.Create(Options("foo", null!));
-        var keys = (await store.ListAsync("adapters/")).Select(f => f.Key).OrderBy(k => k).ToList();
+        await Push("foobar", "5.0.0");
+        await Push("foo", "patch");
+        await Push("foo", "patch");
+
+        var keys = (await store.ListAsync("adapters-versions/")).Select(f => f.Key).OrderBy(k => k).ToList();
         CollectionAssert.AreEqual(
-            new[] { "adapters/foo/1.0.0", "adapters/foo/1.0.1", "adapters/foobar/5.0.0" }, keys);
+            new[] { "adapters-versions/foo/1.0.0", "adapters-versions/foo/1.0.1", "adapters-versions/foobar/5.0.0" }, keys);
 
-        var metadata = await store.GetMetadataAsync("adapters/foo/1.0.1");
+        var metadata = await store.GetMetadataAsync("adapters-versions/foo/1.0.1");
         Assert.AreEqual(InstallerLogic.Sha256Of(zip), metadata["Sha256"]);
         Assert.AreEqual(64, metadata["Sha256"].Length);
+        Assert.AreEqual(metadata["Sha256"], metadata["Hash"]);
     }
 
     [TestMethod]
     public async Task An_invalid_adapter_id_is_not_uploaded()
     {
-        var publish = Publish("Adapter.dll");
-        var zip = Path.Combine(root, "adapter.zip");
-        Assert.IsTrue(new InstallerLogic().Compress(publish, zip));
-
-        Assert.IsFalse(await new InstallerLogic().PushToCloud(zip, "Adapter.dll", new ServerlessUploadOptions
+        var store = CloudFilesFactory.Create(new ServerlessUploadOptions
         {
             Provider = "local", BucketName = "bucket", ServiceUrl = Path.Combine(root, "store"),
-            AdapterId = "../escape",
-        }));
+        });
+
+        await Assert.ThrowsExceptionAsync<SW.PrimitiveTypes.SWException>(() => PackagePublisher.PublishAsync(store,
+            new PublishRequest { AdapterId = "../escape", PublishPath = Publish("Adapter.dll"), EntryAssembly = "Adapter.dll" }));
+        Assert.AreEqual(0, (await store.ListAsync("")).Count());
     }
 }
 

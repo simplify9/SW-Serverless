@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Extensions.Configuration;
@@ -23,8 +24,23 @@ namespace SW.Serverless.Installer.Shared
         /// <summary>Every provider name this tool accepts, for help text and error messages.</summary>
         public static readonly IReadOnlyList<string> Providers = new[] { "s3", "as", "oc", "gc", "local" };
 
+        /// <summary>
+        /// Extra providers, by name, for tests only. The filesystem provider stores a key as a file,
+        /// so it cannot hold <c>adapters/{id}</c> and <c>adapters/{id}/{version}</c> side by side the
+        /// way every object store does; the tests register a store with object-store semantics here
+        /// rather than needing a cloud account to exercise the real layout.
+        /// </summary>
+        static readonly ConcurrentDictionary<string, Func<ServerlessUploadOptions, ICloudFilesService>> registered =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        internal static void Register(string provider, Func<ServerlessUploadOptions, ICloudFilesService> factory) =>
+            registered[provider] = factory;
+
         public static ICloudFilesService Create(ServerlessUploadOptions options)
         {
+            if (options.Provider != null && registered.TryGetValue(options.Provider, out var custom))
+                return custom(options);
+
             var services = new ServiceCollection();
 
             // The registration extensions bind their options from configuration, so a container
