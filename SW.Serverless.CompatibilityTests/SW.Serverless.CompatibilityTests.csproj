@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Backward compatibility with what is already deployed: hosts on SimplyWorks.Serverless
+         10.0.x, older Bitween builds, and adapters built against the published SDK. Each old side is
+         the PUBLISHED package, never this repository's project. -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+        <PackageReference Include="MSTest.TestAdapter" Version="3.7.1" />
+        <PackageReference Include="MSTest.TestFramework" Version="3.7.1" />
+        <PackageReference Include="coverlet.collector" Version="6.0.4">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests" Version="10.0.0" />
+        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="10.0.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- The NEW side: this repository's host and installer. -->
+        <ProjectReference Include="..\SW.Serverless\SW.Serverless.csproj" />
+        <ProjectReference Include="..\SW.Serverless.Installer\SW.Serverless.Installer.csproj" />
+
+        <!-- Build order only: these run as separate processes, or are packaged and installed. -->
+        <ProjectReference Include="..\SW.Serverless.Compat.OldHost\SW.Serverless.Compat.OldHost.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Compat.ClassicV10\SW.Serverless.Compat.ClassicV10.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Compat.ResidentV10\SW.Serverless.Compat.ResidentV10.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.UnitTests.Adapter\SW.Serverless.UnitTests.Adapter.csproj"
+                          ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Samples.Classic\SW.Serverless.Samples.Classic.csproj"
+                          ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+</Project>

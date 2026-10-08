@@ -12,13 +12,14 @@
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <Copyright>Simplify9</Copyright>
         <Company>Simplify9</Company>
-        <Description>Wire contract shared by the SW.Serverless host and the adapter SDK: the protocol-2 envelope used by resident and orchestrated adapters.</Description>
+        <Description>Contracts shared by the SW.Serverless host, the adapter SDK and the installer: the protocol-2 envelope used by resident and orchestrated adapters, and the adapter manifest and catalog.</Description>
     </PropertyGroup>
 
     <ItemGroup>
         <PackageReference Include="Google.Protobuf" Version="3.28.3" />
         <PackageReference Include="Grpc.Core.Api" Version="2.66.0" />
         <PackageReference Include="Grpc.Tools" Version="2.66.0" PrivateAssets="All" />
+        <PackageReference Include="SimplyWorks.PrimitiveTypes" Version="10.0.0" />
     </ItemGroup>
 
     <ItemGroup>

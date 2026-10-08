@@ -60,7 +60,7 @@ namespace SW.Serverless.UnitTests
             cloudFiles);
 
         static async Task Publish(string adapterId, IDictionary<string, string> entries,
-            string hash, string entryAssembly = "Adapter.dll")
+            string hash, string entryAssembly = "Adapter.dll", string key = null)
         {
             using var buffer = new MemoryStream();
             using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
@@ -74,7 +74,7 @@ namespace SW.Serverless.UnitTests
             buffer.Position = 0;
             await cloudFiles.WriteAsync(buffer, new WriteFileSettings
             {
-                Key = $"adapters/{adapterId}",
+                Key = key ?? $"adapters/{adapterId}",
                 ContentType = "application/zip",
                 Metadata = new Dictionary<string, string> { ["EntryAssembly"] = entryAssembly, ["Hash"] = hash }
             });
@@ -145,6 +145,115 @@ namespace SW.Serverless.UnitTests
 
             Assert.IsFalse(Directory.Exists(a1.Directory));
             Assert.IsTrue(Directory.Exists(b1.Directory));
+        }
+
+        // ------------------------------------------------------------------ manifests
+
+        static string Manifest(string json) => json;
+
+        [TestMethod]
+        public async Task A_package_without_a_manifest_runs_as_its_metadata_says()
+        {
+            await Publish("no-manifest", new Dictionary<string, string> { ["Adapter.dll"] = "ok" }, hash: "nm1");
+
+            var installed = await Installer().InstallAsync("no-manifest");
+
+            Assert.IsNull(installed.Manifest);
+            Assert.AreEqual("Adapter.dll", Path.GetFileName(installed.LocalPath));
+        }
+
+        [TestMethod]
+        public async Task The_manifest_says_what_to_start_when_it_disagrees_with_metadata()
+        {
+            await Publish("manifest-entry", new Dictionary<string, string>
+            {
+                ["Adapter.dll"] = "metadata says this",
+                ["bin/Real.dll"] = "manifest says this",
+                ["adapter.json"] = Manifest("""{ "id": "manifest-entry", "entry": "bin/Real.dll", "displayName": "Real one", "futureField": 1 }""")
+            }, hash: "me1");
+
+            var installed = await Installer().InstallAsync("manifest-entry");
+
+            Assert.AreEqual("Real one", installed.Manifest.DisplayName);
+            Assert.AreEqual("Real.dll", Path.GetFileName(installed.LocalPath));
+            Assert.IsTrue(installed.Manifest.Extensions.ContainsKey("futureField"), "unknown fields are kept");
+        }
+
+        [TestMethod]
+        public async Task A_manifest_entry_outside_the_package_is_refused()
+        {
+            await Publish("manifest-escape", new Dictionary<string, string>
+            {
+                ["Adapter.dll"] = "ok",
+                ["adapter.json"] = """{ "entry": "../../usr/bin/env" }"""
+            }, hash: "mx1");
+
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => Installer().InstallAsync("manifest-escape"));
+        }
+
+        [TestMethod]
+        public async Task An_adapter_needing_a_newer_host_is_refused_with_both_versions()
+        {
+            await Publish("needs-newer", new Dictionary<string, string>
+            {
+                ["Adapter.dll"] = "ok",
+                ["adapter.json"] = """{ "compatibility": { "minHostVersion": "99.0.0" } }"""
+            }, hash: "nn1");
+
+            var error = await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => Installer().InstallAsync("needs-newer"));
+            StringAssert.Contains(error.Message, "99.0.0");
+            StringAssert.Contains(error.Message, HostInfo.Version.ToString());
+        }
+
+        [TestMethod]
+        public async Task A_runtime_the_host_cannot_launch_is_refused_by_name()
+        {
+            await Publish("needs-python", new Dictionary<string, string>
+            {
+                ["main.py"] = "print()",
+                ["adapter.json"] = """{ "runtime": "python", "entry": "main.py" }"""
+            }, hash: "py1", entryAssembly: "main.py");
+
+            var error = await Assert.ThrowsExceptionAsync<NotSupportedException>(() => Installer().InstallAsync("needs-python"));
+            StringAssert.Contains(error.Message, "python");
+        }
+
+        [TestMethod]
+        public async Task A_pinned_version_is_read_from_the_versions_prefix()
+        {
+            await Publish("pinned", new Dictionary<string, string> { ["Adapter.dll"] = "current" }, hash: "pc1");
+            await Publish("pinned", new Dictionary<string, string> { ["Adapter.dll"] = "one-oh" }, hash: "p100",
+                key: "adapters-versions/pinned/1.0.0");
+
+            var current = await Installer().InstallAsync("pinned");
+            var pinned = await Installer().InstallAsync("pinned/1.0.0");
+
+            Assert.AreEqual("current", File.ReadAllText(current.LocalPath));
+            Assert.AreEqual("one-oh", File.ReadAllText(pinned.LocalPath));
+            Assert.AreEqual("adapters-versions/pinned/1.0.0", pinned.RemoteKey);
+        }
+
+        [TestMethod]
+        public async Task A_version_an_older_installer_published_is_still_found()
+        {
+            // Where the installer put versions before they had a prefix of their own.
+            await Publish("legacy-pinned", new Dictionary<string, string> { ["Adapter.dll"] = "old-layout" }, hash: "lp1",
+                key: "adapters/legacy-pinned/2.0.0");
+
+            var pinned = await Installer().InstallAsync("legacy-pinned/2.0.0");
+
+            Assert.AreEqual("old-layout", File.ReadAllText(pinned.LocalPath));
+            Assert.AreEqual("adapters/legacy-pinned/2.0.0", pinned.RemoteKey);
+        }
+
+        [TestMethod]
+        public void Host_version_checks_accept_older_and_equal_and_refuse_newer()
+        {
+            Assert.IsTrue(HostInfo.Satisfies(null));
+            Assert.IsTrue(HostInfo.Satisfies("10.0.0"));
+            Assert.IsTrue(HostInfo.Satisfies(HostInfo.Baseline));
+            Assert.IsFalse(HostInfo.Satisfies("99.0.0"));
+            Assert.IsTrue(HostInfo.Satisfies("not a version"), "an unreadable minimum does not block the adapter");
         }
 
         [TestMethod]

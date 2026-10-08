@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A host as deployed today: the PUBLISHED SimplyWorks.Serverless 10.0.0, never this repository's
+       project. The compatibility tests run it as a separate process against storage written by the
+       current installer, which is the only honest way to show an old host still runs it. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SimplyWorks.Serverless" Version="10.0.0" />
+    <PackageReference Include="SimplyWorks.CloudFiles.LocalTests" Version="10.0.0" />
+    <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="10.0.0" />
+  </ItemGroup>
+</Project>
