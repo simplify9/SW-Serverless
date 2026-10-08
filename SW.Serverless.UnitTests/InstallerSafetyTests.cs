@@ -60,7 +60,7 @@ namespace SW.Serverless.UnitTests
             cloudFiles);
 
         static async Task Publish(string adapterId, IDictionary<string, string> entries,
-            string hash, string entryAssembly = "Adapter.dll")
+            string hash, string entryAssembly = "Adapter.dll", string key = null)
         {
             using var buffer = new MemoryStream();
             using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
@@ -74,7 +74,7 @@ namespace SW.Serverless.UnitTests
             buffer.Position = 0;
             await cloudFiles.WriteAsync(buffer, new WriteFileSettings
             {
-                Key = $"adapters/{adapterId}",
+                Key = key ?? $"adapters/{adapterId}",
                 ContentType = "application/zip",
                 Metadata = new Dictionary<string, string> { ["EntryAssembly"] = entryAssembly, ["Hash"] = hash }
             });
@@ -216,6 +216,34 @@ namespace SW.Serverless.UnitTests
 
             var error = await Assert.ThrowsExceptionAsync<NotSupportedException>(() => Installer().InstallAsync("needs-python"));
             StringAssert.Contains(error.Message, "python");
+        }
+
+        [TestMethod]
+        public async Task A_pinned_version_is_read_from_the_versions_prefix()
+        {
+            await Publish("pinned", new Dictionary<string, string> { ["Adapter.dll"] = "current" }, hash: "pc1");
+            await Publish("pinned", new Dictionary<string, string> { ["Adapter.dll"] = "one-oh" }, hash: "p100",
+                key: "adapters-versions/pinned/1.0.0");
+
+            var current = await Installer().InstallAsync("pinned");
+            var pinned = await Installer().InstallAsync("pinned/1.0.0");
+
+            Assert.AreEqual("current", File.ReadAllText(current.LocalPath));
+            Assert.AreEqual("one-oh", File.ReadAllText(pinned.LocalPath));
+            Assert.AreEqual("adapters-versions/pinned/1.0.0", pinned.RemoteKey);
+        }
+
+        [TestMethod]
+        public async Task A_version_an_older_installer_published_is_still_found()
+        {
+            // Where the installer put versions before they had a prefix of their own.
+            await Publish("legacy-pinned", new Dictionary<string, string> { ["Adapter.dll"] = "old-layout" }, hash: "lp1",
+                key: "adapters/legacy-pinned/2.0.0");
+
+            var pinned = await Installer().InstallAsync("legacy-pinned/2.0.0");
+
+            Assert.AreEqual("old-layout", File.ReadAllText(pinned.LocalPath));
+            Assert.AreEqual("adapters/legacy-pinned/2.0.0", pinned.RemoteKey);
         }
 
         [TestMethod]

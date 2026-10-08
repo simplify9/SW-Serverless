@@ -78,7 +78,10 @@ namespace SW.Serverless.Contract.Catalog
     /// <list type="bullet">
     /// <item><c>adapters/{id}</c> — the package that runs when no version is pinned. Unchanged
     /// from before versioning, so every existing host keeps running it.</item>
-    /// <item><c>adapters/{id}/{version}</c> — one immutable package per version.</item>
+    /// <item><c>adapters-versions/{id}/{version}</c> — one immutable package per version. Not
+    /// <c>adapters/{id}/{version}</c>: storage backed by a file system cannot keep <c>adapters/{id}</c>
+    /// as a file and as a folder at once, and hosts older than versions list everything under
+    /// <c>adapters/</c>. Versions an older installer did put there are still read, as a fallback.</item>
     /// <item><c>adapters-catalog/{id}.json</c> — the catalog entry. Outside <c>adapters/</c> on
     /// purpose: hosts older than the catalog list every key under it as an adapter.</item>
     /// </list>
@@ -91,6 +94,13 @@ namespace SW.Serverless.Contract.Catalog
             $"{root}/{adapterId}".ToLowerInvariant();
 
         public static string Version(string root, string adapterId, string version) =>
+            $"{root}-versions/{adapterId}/{version}".ToLowerInvariant();
+
+        public static string VersionsRoot(string root, string adapterId) =>
+            $"{root}-versions/{adapterId}/".ToLowerInvariant();
+
+        /// <summary>Where an installer from before this layout put a version. Read, never written.</summary>
+        public static string LegacyVersion(string root, string adapterId, string version) =>
             $"{root}/{adapterId}/{version}".ToLowerInvariant();
 
         public static string CatalogRoot(string root) => $"{root}-catalog/".ToLowerInvariant();

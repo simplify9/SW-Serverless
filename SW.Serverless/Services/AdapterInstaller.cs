@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -51,7 +52,7 @@ namespace SW.Serverless
             try
             {
                 if (!Directory.Exists(directory))
-                    await ExtractAsync(adapterId, directory);
+                    await ExtractAsync(adapterId, metadata.RemoteKey, directory);
             }
             finally
             {
@@ -116,7 +117,7 @@ namespace SW.Serverless
         /// temporary directory behind rather than a half-filled one that "exists, so installed" would
         /// trust forever, and a second host process sharing the path sees either nothing or all of it.
         /// </summary>
-        async Task ExtractAsync(string adapterId, string directory)
+        async Task ExtractAsync(string adapterId, string remoteKey, string directory)
         {
             // ZipArchive needs a SEEKABLE stream to read the central directory. The
             // cloud-storage read stream is not seekable, so handing it directly to
@@ -132,8 +133,7 @@ namespace SW.Serverless
             var staging = $"{directory}.extracting-{Guid.NewGuid():N}";
             try
             {
-                using (var remoteStream = await cloudFilesService.OpenReadAsync(
-                           $"{options.AdapterRemotePath}/{adapterId}".ToLower()))
+                using (var remoteStream = await cloudFilesService.OpenReadAsync(remoteKey))
                 using (var tempFileStream = new FileStream(tempZipPath, FileMode.Create,
                            FileAccess.Write, FileShare.None))
                 {
@@ -254,6 +254,24 @@ namespace SW.Serverless
             catch { /* pruning is housekeeping and must never fail an install */ }
         }
 
+        /// <summary>
+        /// Where <paramref name="adapterRef"/>'s package is stored. A plain id is the current
+        /// package, as it always was. A pinned ref, <c>{id}/{version}</c>, is the version under the
+        /// versions prefix, or — for a version an older installer published — beside the current
+        /// package, where that installer put it.
+        /// </summary>
+        async Task<string> RemoteKeyOf(string adapterRef)
+        {
+            var root = options.AdapterRemotePath;
+            var (adapterId, version) = AdapterCatalogPaths.Split(adapterRef);
+            if (version == null) return AdapterCatalogPaths.Current(root, adapterRef);
+
+            var key = AdapterCatalogPaths.Version(root, adapterId, version);
+            if ((await cloudFilesService.ListAsync(key)).Any(f => string.Equals(f.Key, key, StringComparison.Ordinal)))
+                return key;
+            return AdapterCatalogPaths.LegacyVersion(root, adapterId, version);
+        }
+
         public async Task<InstalledAdapter> GetMetadataAsync(string adapterId)
         {
             if (memoryCache.TryGetValue($"{NamingPrefix}.{adapterId}", out InstalledAdapter cached))
@@ -264,7 +282,7 @@ namespace SW.Serverless
                     $"Adapter '{adapterId}' must be installed from cloud storage, but no " +
                     "ICloudFilesService is registered. Register one, or start it from a local path.");
 
-            var remotePath = $"{options.AdapterRemotePath}/{adapterId}".ToLower();
+            var remotePath = await RemoteKeyOf(adapterId);
             var raw = await cloudFilesService.GetMetadataAsync(remotePath);
             var metadata = new Dictionary<string, string>(raw, StringComparer.OrdinalIgnoreCase);
 
@@ -280,6 +298,7 @@ namespace SW.Serverless
             var installed = new InstalledAdapter
             {
                 AdapterId = adapterId,
+                RemoteKey = remotePath,
                 EntryAssembly = entryAssembly,
                 Hash = hash,
                 AdapterValues = metadata
@@ -341,6 +360,9 @@ namespace SW.Serverless
     public class InstalledAdapter
     {
         public string AdapterId { get; set; }
+
+        /// <summary>The storage key the package was read from.</summary>
+        public string RemoteKey { get; set; }
         public string Hash { get; set; }
         public string EntryAssembly { get; set; }
         public string LocalPath { get; set; }
