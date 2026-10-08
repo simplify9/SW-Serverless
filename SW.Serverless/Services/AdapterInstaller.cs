@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Caching.Memory;
 using SW.PrimitiveTypes;
+using SW.Serverless.Contract.Catalog;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -59,7 +60,54 @@ namespace SW.Serverless
 
             PruneSupersededVersions(adapterId, directory);
 
+            ApplyManifest(metadata);
             return metadata;
+        }
+
+        /// <summary>
+        /// Reads the package's own <see cref="AdapterManifest"/>, when it has one. Where the manifest
+        /// and the storage metadata disagree about what to start, the manifest wins: it travels inside
+        /// the package, while metadata can be changed without touching it. A package without a
+        /// manifest — every package published before them — is left exactly as its metadata says.
+        /// </summary>
+        void ApplyManifest(InstalledAdapter installed)
+        {
+            if (installed.Manifest != null || string.IsNullOrEmpty(installed.Directory)) return;
+
+            var path = Path.Combine(installed.Directory, AdapterManifest.FileName);
+            if (!File.Exists(path)) return;
+
+            AdapterManifest manifest;
+            try
+            {
+                manifest = AdapterManifest.Parse(File.ReadAllText(path));
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidDataException(
+                    $"Adapter '{installed.AdapterId}' has an {AdapterManifest.FileName} that cannot be read: {ex.Message}", ex);
+            }
+
+            // A runtime this host has no launcher for is refused now, with its name, rather than
+            // started with dotnet and failing in a way that says nothing about why.
+            if (!string.IsNullOrWhiteSpace(manifest.Runtime) &&
+                !string.Equals(manifest.Runtime, AdapterManifest.DotnetRuntime, StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException(
+                    $"Adapter '{installed.AdapterId}' needs the '{manifest.Runtime}' runtime, which this host does not have.");
+
+            if (!HostInfo.Satisfies(manifest.Compatibility?.MinHostVersion))
+                throw new InvalidOperationException(
+                    $"Adapter '{installed.AdapterId}' needs SW.Serverless {manifest.Compatibility.MinHostVersion} or later; this host is {HostInfo.Version}.");
+
+            if (!string.IsNullOrWhiteSpace(manifest.Entry))
+            {
+                installed.LocalPath = ContainedPath(installed.Directory, manifest.Entry.Replace("\\", "/"))
+                                      ?? throw new InvalidOperationException(
+                                          $"Adapter '{installed.AdapterId}' declares an entry outside its package: '{manifest.Entry}'.");
+                installed.EntryAssembly = manifest.Entry;
+            }
+
+            installed.Manifest = manifest;
         }
 
         /// <summary>
@@ -299,6 +347,9 @@ namespace SW.Serverless
 
         /// <summary>The extraction directory the package was unpacked into.</summary>
         public string Directory { get; set; }
+
+        /// <summary>The package's own description, once installed. Null for a package without one.</summary>
+        public AdapterManifest Manifest { get; set; }
 
         public IDictionary<string, string> AdapterValues { get; set; } = new Dictionary<string, string>();
     }

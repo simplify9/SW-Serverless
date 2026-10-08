@@ -147,6 +147,87 @@ namespace SW.Serverless.UnitTests
             Assert.IsTrue(Directory.Exists(b1.Directory));
         }
 
+        // ------------------------------------------------------------------ manifests
+
+        static string Manifest(string json) => json;
+
+        [TestMethod]
+        public async Task A_package_without_a_manifest_runs_as_its_metadata_says()
+        {
+            await Publish("no-manifest", new Dictionary<string, string> { ["Adapter.dll"] = "ok" }, hash: "nm1");
+
+            var installed = await Installer().InstallAsync("no-manifest");
+
+            Assert.IsNull(installed.Manifest);
+            Assert.AreEqual("Adapter.dll", Path.GetFileName(installed.LocalPath));
+        }
+
+        [TestMethod]
+        public async Task The_manifest_says_what_to_start_when_it_disagrees_with_metadata()
+        {
+            await Publish("manifest-entry", new Dictionary<string, string>
+            {
+                ["Adapter.dll"] = "metadata says this",
+                ["bin/Real.dll"] = "manifest says this",
+                ["adapter.json"] = Manifest("""{ "id": "manifest-entry", "entry": "bin/Real.dll", "displayName": "Real one", "futureField": 1 }""")
+            }, hash: "me1");
+
+            var installed = await Installer().InstallAsync("manifest-entry");
+
+            Assert.AreEqual("Real one", installed.Manifest.DisplayName);
+            Assert.AreEqual("Real.dll", Path.GetFileName(installed.LocalPath));
+            Assert.IsTrue(installed.Manifest.Extensions.ContainsKey("futureField"), "unknown fields are kept");
+        }
+
+        [TestMethod]
+        public async Task A_manifest_entry_outside_the_package_is_refused()
+        {
+            await Publish("manifest-escape", new Dictionary<string, string>
+            {
+                ["Adapter.dll"] = "ok",
+                ["adapter.json"] = """{ "entry": "../../usr/bin/env" }"""
+            }, hash: "mx1");
+
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => Installer().InstallAsync("manifest-escape"));
+        }
+
+        [TestMethod]
+        public async Task An_adapter_needing_a_newer_host_is_refused_with_both_versions()
+        {
+            await Publish("needs-newer", new Dictionary<string, string>
+            {
+                ["Adapter.dll"] = "ok",
+                ["adapter.json"] = """{ "compatibility": { "minHostVersion": "99.0.0" } }"""
+            }, hash: "nn1");
+
+            var error = await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => Installer().InstallAsync("needs-newer"));
+            StringAssert.Contains(error.Message, "99.0.0");
+            StringAssert.Contains(error.Message, HostInfo.Version.ToString());
+        }
+
+        [TestMethod]
+        public async Task A_runtime_the_host_cannot_launch_is_refused_by_name()
+        {
+            await Publish("needs-python", new Dictionary<string, string>
+            {
+                ["main.py"] = "print()",
+                ["adapter.json"] = """{ "runtime": "python", "entry": "main.py" }"""
+            }, hash: "py1", entryAssembly: "main.py");
+
+            var error = await Assert.ThrowsExceptionAsync<NotSupportedException>(() => Installer().InstallAsync("needs-python"));
+            StringAssert.Contains(error.Message, "python");
+        }
+
+        [TestMethod]
+        public void Host_version_checks_accept_older_and_equal_and_refuse_newer()
+        {
+            Assert.IsTrue(HostInfo.Satisfies(null));
+            Assert.IsTrue(HostInfo.Satisfies("10.0.0"));
+            Assert.IsTrue(HostInfo.Satisfies(HostInfo.Baseline));
+            Assert.IsFalse(HostInfo.Satisfies("99.0.0"));
+            Assert.IsTrue(HostInfo.Satisfies("not a version"), "an unreadable minimum does not block the adapter");
+        }
+
         [TestMethod]
         public void Contained_paths_stay_inside_their_root()
         {
