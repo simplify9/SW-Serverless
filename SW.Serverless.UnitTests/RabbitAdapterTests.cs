@@ -58,8 +58,7 @@ namespace SW.Serverless.UnitTests
 
             try
             {
-                broker = new RabbitMqBuilder()
-                    .WithImage("rabbitmq:3.13-management")
+                broker = new RabbitMqBuilder("rabbitmq:3.13-management")
                     .Build();
 
                 using var startup = new CancellationTokenSource(TimeSpan.FromMinutes(3));

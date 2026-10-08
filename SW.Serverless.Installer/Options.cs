@@ -37,7 +37,7 @@ namespace SW.Serverless.Installer
         public string ServiceUrl { get; set; }
 
 
-        [Option('c', "cloudfilesconfigpath", HelpText = "Json cloud files config path. (required for Oracle Cloud)")]
+        [Option('c', "cloudfilesconfigpath", HelpText = "Json cloud files config path. Oracle Cloud needs one; Google Cloud needs one or the SWSL_GC_* environment variables.")]
         public string CloudFilesConfigPath { get; set; }
 
         [Option('v', "version",
@@ -45,10 +45,12 @@ namespace SW.Serverless.Installer
                 "Semantic version in the format major.minor.patch, or specify 'major', 'minor', or 'patch' to auto-increment the respective part.")]
         public string Version { get; set; }
 
-        [Value(0, HelpText = "Path to project file (csproj)")]
+        [Value(0, Required = true, MetaName = "project", HelpText = "Path to project file (csproj)")]
         public string ProjectPath { get; set; }
 
-        [Value(1, HelpText = "Adapter Id")] public string AdapterId { get; set; }
+        [Value(1, Required = true, MetaName = "adapter-id",
+            HelpText = "Adapter Id: lowercase letters, digits, '.', '_' and '-'.")]
+        public string AdapterId { get; set; }
     }
 
     public class ServerlessUploadOptions
