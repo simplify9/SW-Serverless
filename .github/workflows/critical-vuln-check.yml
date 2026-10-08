@@ -33,6 +33,6 @@ permissions:
 
 jobs:
   vuln-gate:
-    uses: simplify9/.github/.github/workflows/critical-vuln-gate.yml@main
+    uses: simplify9/.github/.github/workflows/critical-vuln-gate.yml@0f33f79176152bc11acf0ff08ed970ae8b429b3d # main
     secrets:
       dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}

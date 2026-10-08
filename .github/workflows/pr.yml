@@ -1,0 +1,41 @@
+name: Build and Test
+
+# Plain pull_request, not pull_request_target: this checks out and runs the PR's own code, so it
+# must run with the fork's read-only token and without repository secrets.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore SW.Serverless.sln
+
+      - name: Build
+        run: dotnet build SW.Serverless.sln -c Release --no-restore
+
+      # The broker tests start RabbitMQ through Testcontainers; ubuntu-latest has Docker, so they
+      # run here rather than reporting Inconclusive.
+      - name: Test runtime
+        run: dotnet test SW.Serverless.UnitTests/SW.Serverless.UnitTests.csproj -c Release --no-build
+
+      - name: Test installer
+        run: dotnet test SW.Serverless.Installer.UnitTests/SW.Serverless.Installer.UnitTests.csproj -c Release --no-build

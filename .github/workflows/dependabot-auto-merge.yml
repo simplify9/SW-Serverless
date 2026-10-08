@@ -32,7 +32,7 @@ permissions:
 jobs:
   vuln-gate:
     if: ${{ github.actor == 'dependabot[bot]' && github.event.pull_request.base.ref == 'main' }}
-    uses: simplify9/.github/.github/workflows/critical-vuln-gate.yml@main
+    uses: simplify9/.github/.github/workflows/critical-vuln-gate.yml@0f33f79176152bc11acf0ff08ed970ae8b429b3d # main
     secrets:
       dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 
@@ -51,7 +51,7 @@ jobs:
     steps:
       - name: Fetch Dependabot metadata
         id: metadata
-        uses: dependabot/fetch-metadata@v3
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
