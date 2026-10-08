@@ -58,6 +58,74 @@ class Program
 }
 ```
 
+## Publishing Adapters (Installer)
+
+`SW.Serverless.Installer` builds an adapter project (`dotnet publish -c Release`), zips the output and uploads it to the store the runtime installs adapters from. The executable is named `serverless`. From a checkout:
+
+```bash
+dotnet run --project SW.Serverless.Installer -- [options] <path/to/Adapter.csproj> <adapter-id>
+```
+
+```bash
+# S3-compatible storage, next patch version
+serverless -p s3 -a <access-key> -s <secret> -b <bucket> -u https://s3.example.com \
+  -v patch ./MyAdapter/MyAdapter.csproj my.adapter
+
+# Credentials from the environment (CI)
+export SWSL_PROVIDER=s3 SWSL_ACCESS_KEY=... SWSL_SECRET_KEY=... SWSL_BUCKET=adapters SWSL_SERVICE_URL=https://s3.example.com
+serverless -v minor ./MyAdapter/MyAdapter.csproj my.adapter
+
+# Oracle or Google Cloud: settings from a config file
+serverless -c cloudfiles.json -v 2.1.0 ./MyAdapter/MyAdapter.csproj my.adapter
+```
+
+| Flag | Meaning |
+|---|---|
+| `-p`, `--provider` | `s3`, `as` (Azure), `oc` (Oracle), `gc` (Google Cloud) or `local` (filesystem, for development) |
+| `-a`, `--accesskey` | Access key |
+| `-s`, `--secret` | Secret access key |
+| `-b`, `--bucketname` | Bucket name |
+| `-u`, `--url` | Service URL (for `local`, the storage folder) |
+| `-c`, `--cloudfilesconfigpath` | JSON config file (see below) |
+| `-v`, `--version` | `major`, `minor`, `patch`, or an explicit version such as `2.1.0` / `2.1.0-rc.1`. Omit for the legacy unversioned key `adapters/<id>` |
+| `-k`, `--kind` | Roles the adapter serves (e.g. `handler,mapper`), when it does not declare them with `[AdapterKind]` |
+
+The adapter id may contain only lowercase letters, digits, `.`, `_` and `-`, and must start with a letter or digit (uppercase input is lowercased).
+
+**Where settings come from.** Each setting is taken from the first of: the command-line flag, the config file, then the environment variable.
+
+| Environment variable | Setting |
+|---|---|
+| `SWSL_PROVIDER` | Provider |
+| `SWSL_ACCESS_KEY` | Access key |
+| `SWSL_SECRET_KEY` | Secret access key |
+| `SWSL_BUCKET` | Bucket name |
+| `SWSL_SERVICE_URL` | Service URL |
+| `SWSL_REGION` | Region |
+| `SWSL_GC_PROJECT_ID`, `SWSL_GC_PRIVATE_KEY_ID`, `SWSL_GC_PRIVATE_KEY`, `SWSL_GC_CLIENT_EMAIL`, `SWSL_GC_CLIENT_ID`, `SWSL_GC_CLIENT_X509_CERT_URL` | Google Cloud service account fields (`SWSL_GC_PRIVATE_KEY` may use literal `\n` for line breaks) |
+
+The config file holds the same settings under `CloudFiles`. Oracle settings (`Region`, `TenantId`, `UserId`, `FingerPrint`, `RSAKey`, `NamespaceName`) are read only from the file:
+
+```json
+{
+  "CloudFiles": {
+    "Provider": "gc",
+    "BucketName": "adapters",
+    "ProjectId": "my-project",
+    "PrivateKeyId": "…",
+    "PrivateKey": "-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----\n",
+    "ClientEmail": "publisher@my-project.iam.gserviceaccount.com",
+    "ClientId": "…"
+  }
+}
+```
+
+**Versioning.** With `-v`, the zip is uploaded to `adapters/<id>/<version>`. `major`, `minor` and `patch` bump the highest released version already there (or start at `1.0.0`); pre-release and other non-version keys are ignored when finding it. An explicit version must be higher than every released version and must not already exist.
+
+**What is uploaded.** The entry assembly is the project's real `AssemblyName` (checked to exist in the publish output). Every upload carries metadata: `EntryAssembly`, `Lang`, `Timestamp`, `Lifecycle` and `Kind` (read from the assembly), and `Sha256` (hex SHA-256 of the zip). A file that cannot be read fails the packaging rather than being left out.
+
+The tool exits `0` only when the upload completed; a bad command line, an invalid adapter id, a failed build or a failed upload all exit non-zero.
+
 ## Resident Adapters
 
 A classic adapter is launched per invocation and exits when it returns. A **resident** adapter is
