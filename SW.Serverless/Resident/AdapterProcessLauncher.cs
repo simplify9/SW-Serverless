@@ -72,7 +72,7 @@ namespace SW.Serverless.Resident
                 Token = instance.Token,
                 AdapterId = instance.AdapterId,
                 InstanceKey = instance.InstanceKey,
-                Protocol = 2
+                Protocol = ProtocolVersions.Max
             };
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))

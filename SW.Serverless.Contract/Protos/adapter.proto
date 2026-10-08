@@ -27,6 +27,7 @@ message HostFrame {
         Shutdown shutdown = 8;
         EventAck event_ack = 9;
         StateResult state_result = 10;
+        Cancel cancel = 11;
     }
 }
 
@@ -57,6 +58,11 @@ message Invoke {
     // instance has to be told whose call this is.
     map<string, string> properties = 5;
 }
+
+// The host has given up on an Invoke — its timeout passed, or its caller went away. The frame id
+// is the Invoke's own id. Sent only to adapters that list the "cancel" capability in Hello; an
+// adapter built before this field existed never receives it and is unaffected.
+message Cancel {}
 
 message Ping {}
 

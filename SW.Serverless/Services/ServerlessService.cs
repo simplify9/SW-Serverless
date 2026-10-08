@@ -34,6 +34,7 @@ namespace SW.Serverless
         private ILogger adapterLogger;
         private readonly ICloudFilesService cloudFilesService;
         private readonly AdapterInstaller installer;
+        private IDisposable directoryLease;
         /// <summary>
         /// Additive overload for hosts that never install adapters from cloud storage — the
         /// StartAsync(adapterId, correlationId, adapterPath, ...) path needs no ICloudFilesService.
@@ -72,6 +73,8 @@ namespace SW.Serverless
             }
 
             var adapterMetadata = await Install(adapterId);
+            // Held while this process runs, so publishing a newer version can't prune its files.
+            directoryLease = AdapterDirectoryLeases.Hold(adapterMetadata.Directory);
 
             await StartAsync(adapterId, adapterMetadata, correlationId, startupValues);
         }
@@ -314,6 +317,7 @@ namespace SW.Serverless
                 Hash = installed.Hash,
                 EntryAssembly = installed.EntryAssembly,
                 LocalPath = installed.LocalPath,
+                Directory = installed.Directory,
                 AdapterValues = installed.AdapterValues
             };
         }
@@ -341,6 +345,10 @@ namespace SW.Serverless
             {
                 logger.LogWarning(ex, "Service did not dispose properly.");
             }
+            finally
+            {
+                directoryLease?.Dispose();
+            }
 
         }
 
@@ -353,6 +361,7 @@ namespace SW.Serverless
             public string Hash { get; set; }
             public string EntryAssembly { get; set; }
             public string LocalPath { get; set; }
+            public string Directory { get; set; }
             public IDictionary<string, string> AdapterValues { get; set; } = new Dictionary<string, string>();
         }
     }

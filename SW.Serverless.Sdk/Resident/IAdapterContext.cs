@@ -50,6 +50,14 @@ namespace SW.Serverless.Sdk.Resident
         CancellationToken Stopping { get; }
 
         /// <summary>
+        /// Cancelled when the host gives up on the current command — its timeout passed or its
+        /// caller went away — and when the adapter is stopping. A command can also take a
+        /// <see cref="CancellationToken"/> as its last parameter and receive the same token.
+        /// <see cref="CancellationToken.None"/> outside a command.
+        /// </summary>
+        CancellationToken CallCancelled => CancellationToken.None;
+
+        /// <summary>
         /// Push one inbound message to the host and WAIT for it to be durably persisted.
         /// Do not acknowledge your broker until this returns Accepted.
         /// Concurrency is bounded by the host's max-in-flight grant.

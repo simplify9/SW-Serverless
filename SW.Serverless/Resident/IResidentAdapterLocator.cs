@@ -18,6 +18,9 @@ namespace SW.Serverless.Resident
         public string EntryAssemblyPath { get; set; }
         public string Executable { get; set; }
         public System.Collections.Generic.IDictionary<string, string> AdapterValues { get; set; }
+
+        /// <summary>The extraction directory, when installed from storage. Held while the adapter runs.</summary>
+        public string Directory { get; set; }
     }
 
     internal class DefaultResidentAdapterLocator : IResidentAdapterLocator
@@ -48,6 +51,7 @@ namespace SW.Serverless.Resident
             return new ResolvedAdapter
             {
                 EntryAssemblyPath = installed.LocalPath,
+                Directory = installed.Directory,
                 Executable = spec.Executable ?? (values.TryGetValue("Executable", out var exe) ? exe : null),
                 AdapterValues = values
             };

@@ -16,6 +16,7 @@ namespace SW.Serverless.Resident
     internal class AdapterPool : IAsyncDisposable
     {
         readonly AdapterSpec spec;
+        readonly string slotPrefix;
         readonly ResidentAdapterHost host;
         readonly ResidentOptions options;
         readonly ILogger logger;
@@ -24,10 +25,14 @@ namespace SW.Serverless.Resident
         readonly ConcurrentDictionary<string, ResidentAdapterInstance> all = new();
 
         int created;
+        int rented;
+        bool closed;
+        readonly object gate = new();
 
-        public AdapterPool(AdapterSpec spec, ResidentAdapterHost host, ResidentOptions options, ILogger logger)
+        public AdapterPool(AdapterSpec spec, string poolKey, ResidentAdapterHost host, ResidentOptions options, ILogger logger)
         {
             this.spec = spec;
+            slotPrefix = SlotPrefixOf(spec.AdapterId, poolKey);
             this.host = host;
             this.options = options;
             this.logger = logger;
@@ -35,6 +40,44 @@ namespace SW.Serverless.Resident
         }
 
         const int MaxPoolSize = 64;
+
+        /// <summary>
+        /// Slot names carry the pool's identity. They were "pool-1", "pool-2"... in every pool, and
+        /// the host registers slots by adapter id plus slot name — so two pools of one adapter
+        /// (two subscriptions with different settings) overwrote each other's entries: retiring one
+        /// pool's slot killed the other pool's process mid-call, the overwritten process went
+        /// unsupervised, and both shared one state key. The pool with no startup values keeps the
+        /// plain names it always had, so its stored state is still found.
+        /// </summary>
+        internal static string SlotPrefixOf(string adapterId, string poolKey)
+        {
+            if (string.IsNullOrEmpty(poolKey) || string.Equals(poolKey, adapterId, StringComparison.Ordinal))
+                return "pool";
+
+            var tag = poolKey.StartsWith(adapterId + ":", StringComparison.Ordinal)
+                ? poolKey[(adapterId.Length + 1)..]
+                : poolKey;
+            var plain = tag.Length <= 32 && tag.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
+            if (!plain)
+                tag = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(tag)), 0, 8).ToLowerInvariant();
+            return $"pool-{tag}";
+        }
+
+        /// <summary>
+        /// Closes the pool if nothing is checked out and no instance is left, so the host can drop
+        /// it. A pool that is closed hands out no more leases; the caller looks up a fresh one.
+        /// </summary>
+        internal bool TryClose()
+        {
+            lock (gate)
+            {
+                if (closed) return true;
+                if (rented > 0 || !all.IsEmpty) return false;
+                closed = true;
+                return true;
+            }
+        }
 
         /// <summary>
         /// Clamped, because PoolSize comes from adapter metadata rather than from code. An
@@ -55,9 +98,25 @@ namespace SW.Serverless.Resident
                 ? TimeSpan.FromSeconds(seconds)
                 : options.IdleTimeout;
 
+        /// <returns>Null when the pool has been closed; see <see cref="TryClose"/>.</returns>
         public async Task<IAdapterLease> RentAsync(CancellationToken cancellationToken)
         {
-            await slots.WaitAsync(cancellationToken);
+            lock (gate)
+            {
+                if (closed) return null;
+                rented++;
+            }
+
+            try
+            {
+                await slots.WaitAsync(cancellationToken);
+            }
+            catch
+            {
+                lock (gate) rented--;
+                throw;
+            }
+
             try
             {
                 string retiring = null;
@@ -69,7 +128,7 @@ namespace SW.Serverless.Resident
                     if (instance != null)
                         retiring = all.FirstOrDefault(kv => ReferenceEquals(kv.Value, instance)).Key;
 
-                    var slot = $"pool-{Interlocked.Increment(ref created)}";
+                    var slot = $"{slotPrefix}-{Interlocked.Increment(ref created)}";
                     instance = await host.SpawnPooledAsync(spec, slot, cancellationToken);
                     all[slot] = instance;
                 }
@@ -86,6 +145,7 @@ namespace SW.Serverless.Resident
             catch
             {
                 slots.Release();
+                lock (gate) rented--;
                 throw;
             }
         }
@@ -120,6 +180,7 @@ namespace SW.Serverless.Resident
             finally
             {
                 if (!disposed) slots.Release();
+                lock (gate) rented--;
             }
         }
 

@@ -194,5 +194,41 @@ namespace SW.Serverless.Samples.Ticker
             await Task.Delay(TimeSpan.FromSeconds(seconds));
             return new { sleptSeconds = seconds };
         }
+
+        long cancelledCalls;
+
+        /// <summary>
+        /// Waits, but stops when the host gives up on the call: a trailing CancellationToken is
+        /// cancelled by the host's Cancel frame, by the call's own timeout, or by the adapter stopping.
+        /// </summary>
+        public async Task<object> Wait(int seconds, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(seconds), cancellationToken);
+                return new { waitedSeconds = seconds };
+            }
+            catch (OperationCanceledException)
+            {
+                Interlocked.Increment(ref cancelledCalls);
+                throw;
+            }
+        }
+
+        public Task<object> GetCancelledCalls() =>
+            Task.FromResult<object>(new { cancelled = Interlocked.Read(ref cancelledCalls) });
+
+        /// <summary>
+        /// Reads a value the way a classic adapter does, through the static Runner, to show the
+        /// same code works unchanged once the adapter runs resident.
+        /// </summary>
+        public Task<object> ReadThroughRunner(string name) => Task.FromResult<object>(new
+        {
+            value = SW.Serverless.Sdk.Runner.StartupValueOf(name)
+        });
+
+        /// <summary>A result too big to send in one frame.</summary>
+        public Task<string> Huge(int megabytes) =>
+            Task.FromResult(new string('x', megabytes * 1024 * 1024));
     }
 }

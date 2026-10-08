@@ -137,8 +137,13 @@ namespace SW.Serverless.Desktop
                 return;
             }
 
-            var projectFileName = System.IO.Path.GetFileName(projectPath);
-            var entryAssembly = $"{projectFileName.Remove(projectFileName.LastIndexOf('.'))}.dll";
+            var entryAssembly = InstallerLogic.ResolveEntryAssembly(tempPath, projectPath);
+            if (entryAssembly == null)
+            {
+                errors.Text = "The adapter's entry assembly is not in the build output.";
+                installer.Cleanup(tempPath);
+                return;
+            }
             var cloudOptions = new Installer.ServerlessUploadOptions
             {
                 AccessKeyId = chosenConnection.AccessKeyId,
