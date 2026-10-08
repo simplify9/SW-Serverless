@@ -366,12 +366,39 @@ namespace SW.Serverless.UnitTests
 
             // The same allocation that was fine a moment ago is now refused by the runtime, which
             // is the new ceiling being genuinely in force rather than merely recorded.
-            var refused = await Assert.ThrowsExceptionAsync<AdapterInvocationException>(
-                () => adapters.Get(GreedyId, "update-then-restart")
-                    .InvokeAsync<JObject>("Allocate", 400, timeoutSeconds: 60));
+            var handle = adapters.Get(GreedyId, "update-then-restart");
+            Exception refused = null;
+            try
+            {
+                await handle.InvokeAsync<JObject>("Allocate", 400, timeoutSeconds: 60);
+            }
+            catch (Exception ex)
+            {
+                refused = ex;
+            }
 
-            StringAssert.Contains(refused.Message, "OutOfMemory",
-                "the allocation failed for some reason other than the heap ceiling");
+            Assert.IsNotNull(refused, "the allocation past the new ceiling succeeded");
+            if (refused is AdapterInvocationException)
+            {
+                StringAssert.Contains(refused.Message, "OutOfMemory",
+                    "the allocation failed for some reason other than the heap ceiling");
+                return;
+            }
+
+            // The runtime may also give up on the process at the ceiling rather than hand the
+            // OutOfMemoryException back — when it strikes outside the command's own handler — and
+            // the caller then sees the stream close. Both are the ceiling holding; this one is
+            // only accepted on the process's own word that memory is why it died.
+            Assert.IsInstanceOfType(refused, typeof(IOException),
+                $"the allocation failed in an unexpected way: {refused}");
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            bool SaidOutOfMemory() => handle.Diagnostics.Any(line =>
+                line.Contains("OutOfMemory", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("Out of memory", StringComparison.OrdinalIgnoreCase));
+            while (!SaidOutOfMemory() && DateTime.UtcNow < deadline)
+                await Task.Delay(100);
+            Assert.IsTrue(SaidOutOfMemory(),
+                "the adapter died, but not of memory: " + string.Join(" | ", handle.Diagnostics.TakeLast(10)));
         }
 
         [TestMethod]
