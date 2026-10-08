@@ -112,6 +112,24 @@ public class ManifestForwardCompatibilityTests
     }
 
     [TestMethod]
+    public void Unknown_fields_inside_nested_objects_round_trip_too()
+    {
+        const string nested = """
+            {
+              "publisher": { "name": "Acme", "verified": true },
+              "compatibility": { "minHostVersion": "10.0.2", "maxHostVersion": "12.0.0" },
+              "properties": [ { "name": "Endpoint", "pattern": "^https://" } ]
+            }
+            """;
+
+        var again = AdapterManifest.Parse(AdapterManifest.Parse(nested).ToJson());
+
+        Assert.IsTrue(again.Publisher!.Extensions!.ContainsKey("verified"));
+        Assert.IsTrue(again.Compatibility!.Extensions!.ContainsKey("maxHostVersion"));
+        Assert.AreEqual("^https://", again.Properties[0].Extensions!["pattern"].GetString());
+    }
+
+    [TestMethod]
     public void Unknown_catalog_fields_round_trip_without_loss()
     {
         const string json = """

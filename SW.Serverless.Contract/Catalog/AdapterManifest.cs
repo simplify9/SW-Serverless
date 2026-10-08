@@ -176,12 +176,20 @@ namespace SW.Serverless.Contract.Catalog
         public string Name { get; set; }
         public string Url { get; set; }
         public string Email { get; set; }
+
+        /// <summary>Fields written by a newer tool, kept so they are not lost on a round trip.</summary>
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement> Extensions { get; set; }
     }
 
     public class AdapterProtocolRange
     {
         public int Min { get; set; }
         public int Max { get; set; }
+
+        /// <summary>Fields written by a newer tool, kept so they are not lost on a round trip.</summary>
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement> Extensions { get; set; }
     }
 
     /// <summary>The oldest host each side may run on. Absent means no constraint.</summary>
@@ -192,6 +200,10 @@ namespace SW.Serverless.Contract.Catalog
 
         /// <summary>The lowest Bitween that may use it. Bitween warns and refuses to bind it below.</summary>
         public string MinBitweenVersion { get; set; }
+
+        /// <summary>Fields written by a newer tool, kept so they are not lost on a round trip.</summary>
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement> Extensions { get; set; }
     }
 
     /// <summary>One setting the adapter needs, with what a form needs to ask for it.</summary>
@@ -226,5 +238,9 @@ namespace SW.Serverless.Contract.Catalog
 
         /// <summary>A heading to gather related properties under, e.g. "Connection".</summary>
         public string Group { get; set; }
+
+        /// <summary>Fields written by a newer tool, kept so they are not lost on a round trip.</summary>
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement> Extensions { get; set; }
     }
 }
