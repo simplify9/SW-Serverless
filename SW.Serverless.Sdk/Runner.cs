@@ -289,6 +289,10 @@ namespace SW.Serverless.Sdk
             return methodsDictionary;
         }
 
+        /// <summary>What has been declared with <see cref="Expect(string, bool, bool, string)"/> so far.</summary>
+        internal static IReadOnlyDictionary<string, StartupValue> DeclaredStartupValues =>
+            new Dictionary<string, StartupValue>(expectedStartupValues);
+
         public static void Expect(string name, bool optional = false, bool isPrivate = false, string description = null)
         {
             Expect(name, null, optional, isPrivate, description);

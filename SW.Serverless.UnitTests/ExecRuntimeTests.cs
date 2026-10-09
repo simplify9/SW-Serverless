@@ -43,7 +43,10 @@ namespace SW.Serverless.UnitTests
 
             var project = Path.Combine(RepositoryRoot(), Project, Project + ".csproj");
             using (var publish = Process.Start(new ProcessStartInfo("dotnet",
-                       $"publish \"{project}\" -c Release -r {platform} --self-contained true -p:PublishSingleFile=true -o \"{publishDirectory}\" -v q")
+                       $"publish \"{project}\" -c Release -r {platform} --self-contained true -p:PublishSingleFile=true -o \"{publishDirectory}\" " +
+                       // Built under the test's own folder, never beside the sample's usual build output,
+                       // which other tests read.
+                       $"--artifacts-path \"{Path.Combine(workDirectory, "artifacts")}\" -v q")
                    { RedirectStandardOutput = true, RedirectStandardError = true }))
             {
                 var output = await publish!.StandardOutput.ReadToEndAsync() + await publish.StandardError.ReadToEndAsync();
@@ -147,6 +150,24 @@ namespace SW.Serverless.UnitTests
             Assert.AreEqual("dotnet", adapters.Describe().Single(h => h.InstanceKey == "exec").SdkLanguage,
                 "a .NET adapter compiled to a binary still says which SDK it was built with");
             await adapters.StopAsync($"{AdapterId}/1.0.0", "exec", drain: false);
+        }
+
+        /// <summary>A classic session with an adapter in another runtime goes over gRPC, unchanged for the caller.</summary>
+        [TestMethod]
+        public async Task A_classic_session_with_an_exec_adapter_runs_over_grpc()
+        {
+            var service = host.Services.GetRequiredService<IServerlessService>();
+            await service.StartAsync($"{AdapterId}/1.0.0", "corr-exec");
+            try
+            {
+                await service.InvokeAsync("Allocate", 2);
+                var stats = await service.InvokeAsync<JObject>("GetStats", null);
+                Assert.AreEqual(2, stats.Value<int>("allocatedMb"));
+            }
+            finally
+            {
+                ((IDisposable)service).Dispose();
+            }
         }
     }
 }

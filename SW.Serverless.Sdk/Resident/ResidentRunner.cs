@@ -162,6 +162,20 @@ namespace SW.Serverless.Sdk.Resident
                     ProtocolVersion = protocol,
                     SdkVersion = typeof(ResidentRunner).Assembly.GetName().Version?.ToString() ?? "0.0.0",
                     SdkLanguage = "dotnet",
+                    // Declared with Runner.Expect by the time the handshake goes: so in a handler
+                    // that was constructed before it was handed to the runner, which is the usual way.
+                    Settings =
+                    {
+                        Runner.DeclaredStartupValues.Select(kv => new SettingInfo
+                        {
+                            Name = kv.Key,
+                            Description = kv.Value.Description ?? "",
+                            Required = !kv.Value.Optional,
+                            Secret = kv.Value.Private,
+                            DefaultValue = kv.Value.Default ?? "",
+                            Type = kv.Value.Type ?? "text",
+                        })
+                    },
                     Capabilities = { Capabilities() },
                     Commands = { CommandInfos() }
                 }
