@@ -1,0 +1,12 @@
+{
+  "name": "@simplyworks/serverless",
+  "version": "10.1.0",
+  "description": "Write SW-Serverless adapters in JavaScript or TypeScript: settings, commands, and the host protocol, with no dependencies.",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "files": ["src"],
+  "engines": { "node": ">=22" },
+  "scripts": { "test": "node --test" },
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/simplify9/SW-Serverless", "directory": "sdk/node" }
+}
