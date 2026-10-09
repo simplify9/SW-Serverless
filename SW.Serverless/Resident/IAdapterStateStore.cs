@@ -29,7 +29,7 @@ namespace SW.Serverless.Resident
     /// An adapter cannot hold its own progress. The supervisor restarts it, the next instance may
     /// come up on a different node, and a pooled one is not the same process twice — so a cursor
     /// kept in a field is a cursor that resets to the beginning at the least convenient moment.
-    /// Bitween backs this with a table; a sample host can use <see cref="InMemoryAdapterStateStore"/>.
+    /// A host application backs this with a table of its own; a sample host can use <see cref="InMemoryAdapterStateStore"/>.
     ///
     /// Values are small — a bookmark, an offset, a timestamp. A host is entitled to refuse a large
     /// one, and should say so in the returned error rather than storing it.

@@ -88,7 +88,7 @@ public class BuildTests
     }
 
     /// <summary>
-    /// A copy of the BitweenHandler test adapter as an author's project: inside the repository, so
+    /// A copy of the OrdersProcessor test adapter as an author's project: inside the repository, so
     /// its reference to the SDK project still resolves, with an adapter.json and a few files the
     /// source rules must leave out.
     /// </summary>
@@ -109,7 +109,7 @@ public class BuildTests
               </ItemGroup>
             </Project>
             """);
-        File.Copy(Path.Combine(root, "SW.Serverless.UnitTests.BitweenHandler", "Program.cs"), Path.Combine(project, "Program.cs"));
+        File.Copy(Path.Combine(root, "SW.Serverless.UnitTests.OrdersProcessor", "Program.cs"), Path.Combine(project, "Program.cs"));
         File.WriteAllText(Path.Combine(project, AdapterManifest.FileName), authorJson ??
             """{ "id": "acme.orders", "version": "1.2.0", "displayName": "Acme orders", "properties": [ { "name": "Mode", "type": "select", "options": ["working", "broken"] } ] }""");
         File.WriteAllText(Path.Combine(project, ".env"), "API_KEY=never-carried");
@@ -148,8 +148,8 @@ public class BuildTests
         Assert.AreEqual("AcmeOrders.dll", manifest.Entry);
         Assert.AreEqual("10.1.0", manifest.SdkVersion);
         Assert.AreEqual(AdapterManifest.ClassicLifecycle, manifest.Lifecycle);
-        CollectionAssert.AreEqual(new[] { "handler" }, manifest.Kinds);
-        Assert.AreEqual(1, manifest.Contracts!["bitween"]);
+        CollectionAssert.AreEqual(new[] { "processor" }, manifest.Kinds);
+        Assert.AreEqual(1, manifest.Contracts!["orders"]);
 
         var mode = manifest.Properties.Single(p => p.Name == "Mode");
         Assert.AreEqual("select", mode.Type, "the author's presentation is kept");
@@ -184,6 +184,7 @@ public class BuildTests
         {
             PackageDirectory = result.PackageDirectory,
             Settings = new Dictionary<string, string> { ["ApiKey"] = "k" },
+            Contracts = { ContractDocument.FromFile(Path.Combine(AppContext.BaseDirectory, "Contracts", "orders-adapter-contract.v1.json")) },
         });
         Assert.IsTrue(report.Passed, string.Join("; ", report.Checks.Where(c => c.Outcome == CheckOutcome.Failed)));
     }

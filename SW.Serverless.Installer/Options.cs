@@ -54,7 +54,7 @@ namespace SW.Serverless.Installer
         public string Version { get; set; }
 
         [Option("no-promote",
-            HelpText = "With -v: upload the version without making it the one that runs. Promote it later with 'serverless promote'.")]
+            HelpText = "With -v: upload the version without making it the one that runs. Promote it later with 'sw-serverless promote'.")]
         public bool NoPromote { get; set; }
 
         [Option("notes", HelpText = "Release notes for this version (Markdown). Overrides releaseNotes in adapter.json.")]
@@ -76,7 +76,7 @@ namespace SW.Serverless.Installer
         public string AdapterId { get; set; }
     }
 
-    /// <summary><c>serverless promote &lt;id&gt; &lt;version&gt;</c></summary>
+    /// <summary><c>sw-serverless promote &lt;id&gt; &lt;version&gt;</c></summary>
     public class PromoteCliOptions : StorageCliOptions
     {
         [Value(0, Required = true, MetaName = "adapter-id", HelpText = "Adapter Id.")]
@@ -86,14 +86,14 @@ namespace SW.Serverless.Installer
         public string Version { get; set; }
     }
 
-    /// <summary><c>serverless versions &lt;id&gt;</c></summary>
+    /// <summary><c>sw-serverless versions &lt;id&gt;</c></summary>
     public class VersionsCliOptions : StorageCliOptions
     {
         [Value(0, Required = true, MetaName = "adapter-id", HelpText = "Adapter Id.")]
         public string AdapterId { get; set; }
     }
 
-    /// <summary><c>serverless withdraw &lt;id&gt; &lt;version&gt;</c></summary>
+    /// <summary><c>sw-serverless withdraw &lt;id&gt; &lt;version&gt;</c></summary>
     public class WithdrawCliOptions : StorageCliOptions
     {
         [Value(0, Required = true, MetaName = "adapter-id", HelpText = "Adapter Id.")]

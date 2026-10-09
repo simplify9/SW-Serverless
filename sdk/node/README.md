@@ -1,11 +1,11 @@
-# @simplyworks/serverless
+# @simplyworks/sw-serverless
 
 Write SW-Serverless adapters in JavaScript or TypeScript, on Node 22 or later. No dependencies: Node's
 own `http2` speaks the host's protocol — gRPC over a Unix socket — and the SDK carries the protobuf
 messages itself, so it vendors into an adapter package as plain files.
 
 ```js
-const sw = require("@simplyworks/serverless");
+const sw = require("@simplyworks/sw-serverless");
 
 class Greeter {
   static commands = {

@@ -34,7 +34,7 @@ def expect(name, default=None, *, required=None, secret=False, description=None,
     """Declares a setting the adapter reads.
 
     Required unless it has a default or ``required=False`` says otherwise. A secret is masked
-    wherever Bitween shows it. Declaring the same name again replaces it.
+    wherever a host application shows it. Declaring the same name again replaces it.
     """
     if not name or not isinstance(name, str):
         raise ValueError("a setting needs a name")
@@ -119,6 +119,27 @@ def _type_name(tp):
     if tp in (_types._EMPTY, None):
         return "object"
     return getattr(tp, "__name__", str(tp))
+
+
+def implements(contract, version, *kinds):
+    """Declares, on an adapter class, a contract it implements and the kinds of it it is.
+
+        @sw.implements("orders", 1, "processor")
+        class Orders: ...
+
+    A host application's contract package does this for its own base classes."""
+
+    if not contract or not isinstance(version, int):
+        raise ValueError("a contract needs a name and an integer version")
+
+    def mark(cls):
+        contracts = dict(vars(cls).get("__sw_contracts__", {}))
+        contracts[contract] = version
+        cls.__sw_contracts__ = contracts
+        cls.__sw_kinds__ = list(dict.fromkeys([*vars(cls).get("__sw_kinds__", []), *kinds]))
+        return cls
+
+    return mark
 
 
 def commands_of(adapter):

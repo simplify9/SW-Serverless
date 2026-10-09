@@ -12,7 +12,7 @@ namespace SW.Serverless.Tooling.Conformance
     /// <summary>
     /// Runs an adapter package the way a host does — installed from storage, started on its runtime,
     /// called by name — and checks it against its manifest, its own description and every contract
-    /// it declares. What <c>serverless test</c> runs, for an adapter in any language.
+    /// it declares. What <c>sw-serverless test</c> runs, for an adapter in any language.
     /// </summary>
     public class ConformanceRunner
     {
@@ -41,7 +41,7 @@ namespace SW.Serverless.Tooling.Conformance
             var manifestPath = Path.Combine(options.PackageDirectory, AdapterManifest.FileName);
             if (!File.Exists(manifestPath))
             {
-                report.Fail("manifest", $"there is no {AdapterManifest.FileName} in {options.PackageDirectory}; serverless build writes it");
+                report.Fail("manifest", $"there is no {AdapterManifest.FileName} in {options.PackageDirectory}; sw-serverless build writes it");
                 return;
             }
 
@@ -132,7 +132,7 @@ namespace SW.Serverless.Tooling.Conformance
                 if (!code.Secret && (code.Default ?? "") != (file.Default ?? "")) differences.Add($"'{name}' defaults to '{code.Default}' in the adapter but '{file.Default}' in the manifest");
             }
 
-            if (differences.Count > 0) report.Fail("settings match the manifest", string.Join("; ", differences) + " — serverless build rewrites the manifest from the adapter");
+            if (differences.Count > 0) report.Fail("settings match the manifest", string.Join("; ", differences) + " — sw-serverless build rewrites the manifest from the adapter");
             else report.Pass("settings match the manifest", $"{declared.Count} settings");
         }
 

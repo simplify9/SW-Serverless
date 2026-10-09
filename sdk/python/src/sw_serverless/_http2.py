@@ -82,7 +82,7 @@ class GrpcStream:
         headers = _hpack.encode([
             (":method", "POST"), (":scheme", "http"), (":path", self._path), (":authority", "localhost"),
             ("content-type", "application/grpc"), ("te", "trailers"),
-            ("user-agent", "simplyworks-serverless-python"),
+            ("user-agent", "sw-serverless-python"),
         ])
         await self._write(
             PREFACE

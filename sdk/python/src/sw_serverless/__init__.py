@@ -1,6 +1,6 @@
 """Write SW-Serverless adapters in Python.
 
-    import simplyworks_serverless as sw
+    import sw_serverless as sw
 
     class Greeter:
         def __init__(self):
@@ -17,12 +17,12 @@
 ``start`` hook is resident: it runs until stopped, with ``stop``, ``status`` and ``reset`` hooks.
 """
 
-from ._adapter import command, declared_settings, expect, startup_values, value_of
+from ._adapter import command, declared_settings, expect, implements, startup_values, value_of
 from ._runner import SDK_VERSION, AdapterError, Context, context, describe, run
 
 __version__ = SDK_VERSION
 
 __all__ = [
     "AdapterError", "Context", "SDK_VERSION", "command", "context", "declared_settings", "describe",
-    "expect", "run", "startup_values", "value_of",
+    "expect", "implements", "run", "startup_values", "value_of",
 ]

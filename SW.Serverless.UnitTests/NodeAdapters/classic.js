@@ -1,5 +1,5 @@
-// A classic adapter in JavaScript, called as Bitween calls handlers: one session, one call at a time.
-const sw = require("@simplyworks/serverless");
+// A classic adapter in JavaScript, called one session, one call at a time.
+const sw = require("@simplyworks/sw-serverless");
 
 class Classic {
   static commands = {

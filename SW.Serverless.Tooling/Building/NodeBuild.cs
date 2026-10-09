@@ -13,11 +13,11 @@ using SW.Serverless.Contract.Catalog;
 namespace SW.Serverless.Tooling.Building
 {
     /// <summary>
-    /// serverless build for a JavaScript or TypeScript adapter. Node runs JavaScript from its source,
+    /// sw-serverless build for a JavaScript or TypeScript adapter. Node runs JavaScript from its source,
     /// so the package is the adapter's files as they are, TypeScript among them with its types
     /// stripped by Node itself — no compiler, no packages — and a node_modules beside them: the SDK
-    /// and the Bitween kinds from copies this tool carries, and whatever package.json depends on,
-    /// through npm.
+    /// from the copy this tool carries, any packages the request hands it, and whatever
+    /// package.json depends on, through npm.
     /// </summary>
     /// <remarks>
     /// A dependency with a native addon is built for the machine npm runs on, which is not something
@@ -29,7 +29,8 @@ namespace SW.Serverless.Tooling.Building
         public const string DefaultEntry = "main.js";
         public const string DefaultRuntimeVersion = ">=22";
 
-        static readonly string[] OwnPackages = { "@simplyworks/serverless", "@simplyworks/bitween" };
+        /// <summary>The SDK, which the build vendors itself; package.json naming it is not sent to npm.</summary>
+        static readonly string[] OwnPackages = { "@simplyworks/sw-serverless" };
         static readonly string[] TypeScript = { ".ts", ".mts", ".cts" };
 
         internal static async Task BuildAsync(BuildRequest request, string project, AdapterManifest author, BuildResult result)
@@ -69,13 +70,14 @@ namespace SW.Serverless.Tooling.Building
             var platforms = await InstallDependenciesAsync(request, project, author, packageDirectory, result);
             if (!result.Succeeded) return;
             WriteOwnPackages(modules);
+            PythonBuild.WritePackages(request, AdapterManifest.NodeRuntime, modules);
 
             request.Log("Asking the adapter to describe itself...");
             var (description, problem) = await LocalAdapterHost.DescribeAsync(Path.Combine(packageDirectory, entry),
                 AdapterManifest.NodeRuntime, request.Runtimes);
             if (description == null)
             {
-                result.Problems.Add($"{problem}. A Node adapter describes itself through run() from @simplyworks/serverless; make sure {entry} calls it");
+                result.Problems.Add($"{problem}. A Node adapter describes itself through run() from @simplyworks/sw-serverless; make sure {entry} calls it");
                 return;
             }
             result.Warnings.AddRange(description.Warnings);
@@ -93,7 +95,7 @@ namespace SW.Serverless.Tooling.Building
             {
                 manifest.Source = new AdapterSource
                 {
-                    BuildCommand = "serverless build",
+                    BuildCommand = "sw-serverless build",
                     Lockfiles = source.Keys.Where(PackageBuilder.IsLockfile).OrderBy(k => k).ToList(),
                 };
                 var sourceDirectory = Path.Combine(packageDirectory, AdapterSource.DefaultPath);
@@ -184,6 +186,8 @@ namespace SW.Serverless.Tooling.Building
             var dependencies = document?["dependencies"]?.AsObject();
             if (dependencies == null) return authored;
             foreach (var own in OwnPackages) dependencies.Remove(own);
+            foreach (var provided in request.Packages.Where(p => string.Equals(p.Runtime, AdapterManifest.NodeRuntime, StringComparison.OrdinalIgnoreCase)))
+                dependencies.Remove(provided.Name);
             document.Remove("devDependencies");
             if (dependencies.Count == 0) return authored;
 
@@ -233,7 +237,7 @@ namespace SW.Serverless.Tooling.Building
             }
         }
 
-        /// <summary>The SDK and the Bitween kinds, as this tool carries them, under <paramref name="modules"/>.</summary>
+        /// <summary>The SDK, as this tool carries it, under <paramref name="modules"/>.</summary>
         public static void WriteOwnPackages(string modules)
         {
             var assembly = typeof(NodeBuild).Assembly;

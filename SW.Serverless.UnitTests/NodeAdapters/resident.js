@@ -1,5 +1,5 @@
 // A resident adapter in JavaScript: started, kept running, asked for its status, reset and stopped.
-const sw = require("@simplyworks/serverless");
+const sw = require("@simplyworks/sw-serverless");
 
 class Resident {
   static commands = {

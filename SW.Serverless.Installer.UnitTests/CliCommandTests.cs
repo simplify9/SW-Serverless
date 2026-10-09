@@ -58,18 +58,18 @@ public class CliCommandTests
     {
         var work = WorkFolder();
 
-        var (exit, output) = await Cli("init", "AcmeOrders", "--kind", "validator", "--dir", work);
+        var (exit, output) = await Cli("init", "AcmeOrders", "--dir", work);
         Assert.AreEqual(Program.Success, exit, output);
         var project = Path.Combine(work, "AcmeOrders");
         foreach (var file in new[] { "AcmeOrders.csproj", "Program.cs", "adapter.json", "settings.example.json", ".gitignore", "README.md" })
             Assert.IsTrue(File.Exists(Path.Combine(project, file)), file);
         Assert.AreEqual("acme.orders", AdapterManifest.Parse(File.ReadAllText(Path.Combine(project, "adapter.json"))).Id);
-        StringAssert.Contains(File.ReadAllText(Path.Combine(project, "Program.cs")), "IBitweenValidator");
+        StringAssert.Contains(File.ReadAllText(Path.Combine(project, "Program.cs")), "public Task<string> Greet(string name)");
 
         Assert.AreEqual(Program.Failure, (await Cli("init", "AcmeOrders", "--dir", work)).Exit, "an existing project isn't overwritten");
         var (goExit, goOutput) = await Cli("init", "GoOrders", "--lang", "go", "--dir", work);
         Assert.AreEqual(Program.Failure, goExit);
-        StringAssert.Contains(goOutput, "arrives with that language's SDK");
+        StringAssert.Contains(goOutput, "isn't a language the SDK has");
     }
 
     [TestMethod]
@@ -86,7 +86,7 @@ public class CliCommandTests
         StringAssert.Contains(output, "runtime '../sh'");
     }
 
-    /// <summary>An author's project, as BuildTests makes one: the BitweenHandler adapter with an adapter.json.</summary>
+    /// <summary>An author's project, as BuildTests makes one: the sample orders processor with an adapter.json.</summary>
     static string AuthorProject()
     {
         var root = RepositoryRoot();
@@ -104,7 +104,7 @@ public class CliCommandTests
               </ItemGroup>
             </Project>
             """);
-        File.Copy(Path.Combine(root, "SW.Serverless.UnitTests.BitweenHandler", "Program.cs"), Path.Combine(project, "Program.cs"));
+        File.Copy(Path.Combine(root, "SW.Serverless.UnitTests.OrdersProcessor", "Program.cs"), Path.Combine(project, "Program.cs"));
         File.WriteAllText(Path.Combine(project, "adapter.json"), """{ "id": "acme.orders", "version": "1.2.0", "displayName": "Acme orders" }""");
         return project;
     }
@@ -122,14 +122,16 @@ public class CliCommandTests
         var zip = Path.Combine(project, "bin", "serverless", "acme.orders-1.2.0.zip");
         Assert.IsTrue(File.Exists(zip), build.Output);
 
-        var test = await Cli("test", zip, "--settings", settings);
+        // The contract it declares is the application's, handed to the CLI with --contract.
+        var contract = Path.Combine(AppContext.BaseDirectory, "Contracts", "orders-adapter-contract.v1.json");
+        var test = await Cli("test", zip, "--settings", settings, "--contract", contract);
         Assert.AreEqual(Program.Success, test.Exit, test.Output);
-        StringAssert.Contains(test.Output, "PASS bitween handler: Handle answers example 1");
+        StringAssert.Contains(test.Output, "PASS orders processor: Process answers example 1");
         StringAssert.Contains(test.Output, "Conforms.");
 
-        var run = await Cli("run", zip, "--settings", settings, "--call", "Handle", "--input", """{"Data":"{\"order\":1}"}""");
+        var run = await Cli("run", zip, "--settings", settings, "--call", "Process", "--input", """{"OrderId":"SO-1"}""");
         Assert.AreEqual(Program.Success, run.Exit, run.Output);
-        StringAssert.Contains(run.Output, "accepted");
+        StringAssert.Contains(run.Output, "\"Accepted\":true");
 
         var store = Path.Combine(Path.GetDirectoryName(project)!, "store");
         var publish = await Cli("publish", zip, "-p", "local", "-b", "cli-tests", "-u", store);
@@ -152,132 +154,57 @@ public class CliCommandTests
     }
 
     /// <summary>
-    /// What init writes builds and conforms. The templates reference the published SDK and Bitween
-    /// contract packages; until those are on NuGet the project is pointed at the projects themselves,
-    /// with Bitween-api beside this repository.
+    /// What init writes, in every language, builds, conforms and answers: a .NET adapter pointed at
+    /// this repository's SDK project, and Python and Node ones built with the SDK the CLI carries, so
+    /// no NuGet, PyPI or npm is needed.
     /// </summary>
     [DataTestMethod]
-    [DataRow("handler")]
-    [DataRow("receiver")]
-    [DataRow("validator")]
-    public async Task What_init_writes_builds_and_conforms(string kind)
-    {
-        var root = RepositoryRoot();
-        var contracts = Path.GetFullPath(Path.Combine(root, "..", "Bitween-api", "SW.Bitween.Adapters", "SW.Bitween.Adapters.csproj"));
-        if (!File.Exists(contracts)) Assert.Inconclusive($"Bitween-api isn't beside this repository ({contracts})");
-
-        var work = WorkFolder();
-        Assert.AreEqual(Program.Success, (await Cli("init", "Acme" + char.ToUpper(kind[0]) + kind[1..], "--kind", kind, "--dir", work)).Exit);
-        var project = Directory.GetDirectories(work).Single();
-        var csproj = Directory.GetFiles(project, "*.csproj").Single();
-        var text = File.ReadAllText(csproj)
-            .Replace($"<PackageReference Include=\"SimplyWorks.Serverless.Sdk\" Version=\"{Tooling.Scaffolding.Scaffolder.SdkPackageVersion}\" />",
-                $"<ProjectReference Include=\"{Path.Combine(root, "SW.Serverless.Sdk", "SW.Serverless.Sdk.csproj")}\" />")
-            .Replace($"<PackageReference Include=\"SimplyWorks.Bitween.Adapters\" Version=\"{Tooling.Scaffolding.Scaffolder.BitweenAdaptersPackageVersion}\" />",
-                $"<ProjectReference Include=\"{contracts}\" />")
-            .Replace("<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>", "");
-        File.WriteAllText(csproj, text);
-
-        var build = await Cli("build", project, "--no-source");
-        Assert.AreEqual(Program.Success, build.Exit, build.Output);
-
-        var settings = Path.Combine(work, "settings.json");
-        File.WriteAllText(settings, """{ "ApiKey": "k" }""");
-        var test = await Cli("test", Path.Combine(project, "bin", "serverless", "package"), "--settings", settings);
-        Assert.AreEqual(Program.Success, test.Exit, test.Output);
-    }
-
-    /// <summary>
-    /// A Python adapter, from init to a package that conforms: built with the SDK and the Bitween
-    /// kinds vendored from the copies the CLI carries, so no PyPI and no network are needed.
-    /// </summary>
-    [DataTestMethod]
-    [DataRow("handler")]
-    [DataRow("mapper")]
-    [DataRow("receiver")]
-    [DataRow("validator")]
-    public async Task What_init_writes_in_python_builds_and_conforms(string kind)
-    {
-        var work = WorkFolder();
-        var name = "Py" + char.ToUpper(kind[0]) + kind[1..];
-        Assert.AreEqual(Program.Success, (await Cli("init", name, "--lang", "python", "--kind", kind, "--dir", work)).Exit);
-        var project = Path.Combine(work, name);
-        Assert.IsTrue(File.Exists(Path.Combine(project, "main.py")));
-
-        var build = await Cli("build", project);
-        Assert.AreEqual(Program.Success, build.Exit, build.Output);
-
-        var package = Path.Combine(project, "bin", "serverless", "package");
-        var manifest = SW.Serverless.Contract.Catalog.AdapterManifest.Parse(File.ReadAllText(Path.Combine(package, "adapter.json")));
-        Assert.AreEqual("python", manifest.Runtime);
-        Assert.AreEqual(Tooling.Building.PythonBuild.EntryScript, manifest.Entry);
-        Assert.AreEqual("classic", manifest.Lifecycle);
-        Assert.AreEqual(2, manifest.Protocol.Min);
-        CollectionAssert.AreEqual(new[] { kind }, manifest.Kinds);
-        Assert.AreEqual(1, manifest.Contracts["bitween"]);
-        Assert.IsNull(manifest.Platforms, "nothing native: it runs anywhere");
-        Assert.IsTrue(File.Exists(Path.Combine(package, "_vendor", "simplyworks_serverless", "__init__.py")));
-        Assert.IsTrue(File.Exists(Path.Combine(package, "_vendor", "simplyworks_bitween", "__init__.py")));
-        Assert.IsTrue(manifest.Source.Files.ContainsKey("main.py"));
-        Assert.IsTrue(File.Exists(Path.Combine(package, "source", "main.py")));
-
-        var settings = Path.Combine(work, "settings.json");
-        File.WriteAllText(settings, """{ "ApiKey": "k" }""");
-        // The project folder: built first, then checked.
-        var test = await Cli("test", project, "--settings", settings);
-        Assert.AreEqual(Program.Success, test.Exit, test.Output);
-    }
-
-    /// <summary>
-    /// The CLI vendors its own copy of the Bitween kinds for Python, as it carries its own copy of
-    /// the contract; it must be the one Bitween-api maintains.
-    /// </summary>
-    [TestMethod]
-    public void The_python_bitween_kinds_the_cli_carries_are_bitween_s()
-    {
-        var root = RepositoryRoot();
-        var original = Path.GetFullPath(Path.Combine(root, "..", "Bitween-api", "sdk", "python", "src", "simplyworks_bitween", "__init__.py"));
-        if (!File.Exists(original)) Assert.Inconclusive($"Bitween-api isn't beside this repository ({original})");
-        var copy = Path.Combine(root, "SW.Serverless.Tooling", "Contracts", "bitween", "python", "simplyworks_bitween", "__init__.py");
-        Assert.AreEqual(File.ReadAllText(original), File.ReadAllText(copy),
-            "copy Bitween-api/sdk/python/src/simplyworks_bitween into SW.Serverless.Tooling/Contracts/bitween/python");
-    }
-
-    /// <summary>
-    /// A JavaScript or TypeScript adapter, from init to a package that conforms: TypeScript's types
-    /// stripped by Node itself, the SDKs vendored into node_modules from the copies the CLI carries.
-    /// </summary>
-    [DataTestMethod]
-    [DataRow("node", "handler")]
-    [DataRow("node", "receiver")]
-    [DataRow("typescript", "mapper")]
-    [DataRow("typescript", "validator")]
-    public async Task What_init_writes_in_node_builds_and_conforms(string language, string kind)
+    [DataRow("dotnet")]
+    [DataRow("python")]
+    [DataRow("node")]
+    [DataRow("typescript")]
+    public async Task What_init_writes_builds_conforms_and_answers(string language)
     {
         if (language == "typescript" && !NodeStripsTypes())
             Assert.Inconclusive("this machine's node can't strip TypeScript types; it takes Node 22.13 or later");
+
+        var root = RepositoryRoot();
         var work = WorkFolder();
-        var name = (language == "node" ? "Js" : "Ts") + char.ToUpper(kind[0]) + kind[1..];
-        Assert.AreEqual(Program.Success, (await Cli("init", name, "--lang", language, "--kind", kind, "--dir", work)).Exit);
+        var name = "Greeter" + char.ToUpper(language[0]) + language[1..];
+        Assert.AreEqual(Program.Success, (await Cli("init", name, "--lang", language, "--dir", work)).Exit);
         var project = Path.Combine(work, name);
+
+        if (language == "dotnet")
+        {
+            var csproj = Directory.GetFiles(project, "*.csproj").Single();
+            File.WriteAllText(csproj, File.ReadAllText(csproj)
+                .Replace($"<PackageReference Include=\"SimplyWorks.Serverless.Sdk\" Version=\"{Tooling.Scaffolding.Scaffolder.SdkPackageVersion}\" />",
+                    $"<ProjectReference Include=\"{Path.Combine(root, "SW.Serverless.Sdk", "SW.Serverless.Sdk.csproj")}\" />")
+                .Replace("<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>", ""));
+        }
 
         var build = await Cli("build", project);
         Assert.AreEqual(Program.Success, build.Exit, build.Output);
 
         var package = Path.Combine(project, "bin", "serverless", "package");
-        var manifest = SW.Serverless.Contract.Catalog.AdapterManifest.Parse(File.ReadAllText(Path.Combine(package, "adapter.json")));
-        Assert.AreEqual("node", manifest.Runtime);
-        Assert.AreEqual("main.js", manifest.Entry);
-        Assert.AreEqual(language == "node" ? "javascript" : "typescript", manifest.Language);
-        CollectionAssert.AreEqual(new[] { kind }, manifest.Kinds);
-        Assert.IsTrue(File.Exists(Path.Combine(package, "node_modules", "@simplyworks", "serverless", "src", "index.js")));
-        Assert.IsTrue(File.Exists(Path.Combine(package, "node_modules", "@simplyworks", "bitween", "src", "index.js")));
-        Assert.IsTrue(manifest.Source.Files.ContainsKey(language == "node" ? "main.js" : "main.ts"));
+        var manifest = AdapterManifest.Parse(File.ReadAllText(Path.Combine(package, "adapter.json")));
+        Assert.AreEqual(Tooling.Scaffolding.Scaffolder.IdFrom(name), manifest.Id);
+        Assert.AreEqual(language switch { "python" => "python", "node" or "typescript" => "node", _ => "dotnet" }, manifest.Runtime);
+        CollectionAssert.AreEquivalent(new[] { "Greeting", "ApiKey" }, manifest.Properties.Select(p => p.Name).ToArray());
+        Assert.IsTrue(manifest.Properties.Single(p => p.Name == "ApiKey").Secret);
+        Assert.IsNull(manifest.Contracts, "the generic adapter implements no contract");
+        Assert.IsTrue(manifest.Source.Files.Count > 0, "it carries its source");
+        if (language == "python")
+            Assert.IsTrue(File.Exists(Path.Combine(package, "_vendor", "sw_serverless", "__init__.py")));
+        if (language is "node" or "typescript")
+            Assert.IsTrue(File.Exists(Path.Combine(package, "node_modules", "@simplyworks", "sw-serverless", "src", "index.js")));
 
-        var settings = Path.Combine(work, "settings.json");
-        File.WriteAllText(settings, """{ "ApiKey": "k" }""");
-        var test = await Cli("test", project, "--settings", settings);
+        var test = await Cli("test", project);
         Assert.AreEqual(Program.Success, test.Exit, test.Output);
+
+        var run = await Cli("run", project, "--call", "Greet", "--input", "Ada");
+        Assert.AreEqual(Program.Success, run.Exit, run.Output);
+        StringAssert.Contains(run.Output, "Hello, Ada!");
     }
 
     static bool NodeStripsTypes()
@@ -294,17 +221,5 @@ public class CliCommandTests
         {
             return false;
         }
-    }
-
-    [TestMethod]
-    public void The_node_bitween_kinds_the_cli_carries_are_bitween_s()
-    {
-        var root = RepositoryRoot();
-        var original = Path.GetFullPath(Path.Combine(root, "..", "Bitween-api", "sdk", "node"));
-        if (!Directory.Exists(original)) Assert.Inconclusive($"Bitween-api isn't beside this repository ({original})");
-        var copy = Path.Combine(root, "SW.Serverless.Tooling", "Contracts", "bitween", "node", "@simplyworks", "bitween");
-        foreach (var file in new[] { "package.json", "src/index.js", "src/index.d.ts" })
-            Assert.AreEqual(File.ReadAllText(Path.Combine(original, file)), File.ReadAllText(Path.Combine(copy, file)),
-                $"copy Bitween-api/sdk/node/{file} into SW.Serverless.Tooling/Contracts/bitween/node/@simplyworks/bitween");
     }
 }

@@ -3,7 +3,7 @@
 The encoding is the protocol's, the same in every language: a string is its raw UTF-8 text, bytes
 are passed as they are, nothing is an empty payload, and anything else is JSON. A class can take
 charge of its own JSON with ``to_wire``/``from_wire`` and describe it with ``__sw_schema__`` — the
-Bitween types do, to keep the property names the contract fixes.
+types of a contract package do, to keep the property names the contract fixes.
 """
 
 import base64

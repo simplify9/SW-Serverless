@@ -15,17 +15,14 @@ using System.Threading.Tasks;
 
 namespace SW.Serverless.Installer
 {
-    /// <summary><c>serverless init &lt;name&gt;</c></summary>
+    /// <summary><c>sw-serverless init &lt;name&gt;</c></summary>
     public class InitCliOptions
     {
         [Value(0, Required = true, MetaName = "name", HelpText = "The adapter's name, e.g. AcmeOrders: its folder, project and class.")]
         public string Name { get; set; }
 
-        [Option("lang", Default = "dotnet", HelpText = "Its language: dotnet, python, node (JavaScript) or typescript. Go arrives with its SDK.")]
+        [Option("lang", Default = "dotnet", HelpText = "Its language: dotnet, python, node (JavaScript) or typescript.")]
         public string Language { get; set; }
-
-        [Option("kind", Default = "handler", HelpText = "handler, mapper, validator or receiver.")]
-        public string Kind { get; set; }
 
         [Option("id", HelpText = "Its id in storage; derived from the name when not given (AcmeOrders -> acme.orders).")]
         public string Id { get; set; }
@@ -34,7 +31,7 @@ namespace SW.Serverless.Installer
         public string Directory { get; set; }
     }
 
-    /// <summary><c>serverless build [project]</c></summary>
+    /// <summary><c>sw-serverless build [project]</c></summary>
     public class BuildCliOptions
     {
         [Value(0, MetaName = "project", Default = ".", HelpText = "The adapter's project folder, with its adapter.json.")]
@@ -53,7 +50,7 @@ namespace SW.Serverless.Installer
         public bool DryRun { get; set; }
     }
 
-    /// <summary><c>serverless test [package]</c></summary>
+    /// <summary><c>sw-serverless test [package]</c></summary>
     public class TestCliOptions
     {
         [Value(0, MetaName = "package", Default = ".",
@@ -73,7 +70,7 @@ namespace SW.Serverless.Installer
         public int Timeout { get; set; }
     }
 
-    /// <summary><c>serverless run [package] --call Command</c></summary>
+    /// <summary><c>sw-serverless run [package] --call Command</c></summary>
     public class RunCliOptions
     {
         [Value(0, MetaName = "package", Default = ".", HelpText = "A package zip, a package folder, or a project folder (built first).")]
@@ -92,7 +89,7 @@ namespace SW.Serverless.Installer
         public int Timeout { get; set; }
     }
 
-    /// <summary><c>serverless manifest validate [path]</c></summary>
+    /// <summary><c>sw-serverless manifest validate [path]</c></summary>
     public class ManifestCliOptions
     {
         [Value(0, Required = true, MetaName = "action", HelpText = "validate")]
@@ -102,10 +99,10 @@ namespace SW.Serverless.Installer
         public string Path { get; set; }
     }
 
-    /// <summary><c>serverless publish &lt;package&gt;</c></summary>
+    /// <summary><c>sw-serverless publish &lt;package&gt;</c></summary>
     public class PublishPackageCliOptions : StorageCliOptions
     {
-        [Value(0, Required = true, MetaName = "package", HelpText = "A package zip from serverless build.")]
+        [Value(0, Required = true, MetaName = "package", HelpText = "A package zip from sw-serverless build.")]
         public string Package { get; set; }
 
         [Option('v', "version", HelpText = "The version: explicit, or major, minor or patch to bump. The manifest's version unless set.")]
@@ -134,7 +131,6 @@ namespace SW.Serverless.Installer
                 Name = opts.Name,
                 Id = opts.Id,
                 Language = opts.Language,
-                Kind = opts.Kind,
                 ParentDirectory = opts.Directory,
             });
             if (!result.Succeeded)
@@ -143,9 +139,9 @@ namespace SW.Serverless.Installer
                 return Task.FromResult(Failure);
             }
 
-            Console.WriteLine($"Made a {opts.Kind} adapter in {result.ProjectDirectory}:");
+            Console.WriteLine($"Made an adapter in {result.ProjectDirectory}:");
             foreach (var file in result.Files) Console.WriteLine($"  {file}");
-            Console.WriteLine("Next: serverless build, then serverless test --settings settings.json");
+            Console.WriteLine("Next: sw-serverless build, then sw-serverless test --settings settings.json");
             return Task.FromResult(Success);
         }
 
@@ -314,7 +310,7 @@ namespace SW.Serverless.Installer
                 if (string.Equals(runtime, AdapterManifest.PythonRuntime, StringComparison.OrdinalIgnoreCase))
                     return !File.Exists(System.IO.Path.Combine(folder, PythonBuild.EntryScript));
                 if (string.Equals(runtime, AdapterManifest.NodeRuntime, StringComparison.OrdinalIgnoreCase))
-                    return !File.Exists(System.IO.Path.Combine(folder, "node_modules", "@simplyworks", "serverless", "package.json"));
+                    return !File.Exists(System.IO.Path.Combine(folder, "node_modules", "@simplyworks", "sw-serverless", "package.json"));
                 return false;
             }
             catch (JsonException)

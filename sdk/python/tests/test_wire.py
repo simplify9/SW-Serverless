@@ -1,6 +1,6 @@
 import unittest
 
-from simplyworks_serverless import _hpack, _wire
+from sw_serverless import _hpack, _wire
 
 
 class WireTests(unittest.TestCase):
@@ -9,7 +9,7 @@ class WireTests(unittest.TestCase):
             "token": "t", "protocol_version": 2, "capabilities": ["cancel", "command:Greet"],
             "commands": [{"name": "Greet", "returns_value": True, "input_schema": '{"type":"string"}'}],
             "settings": [{"name": "Url", "required": True, "secret": True}],
-            "kinds": ["handler"], "contracts": {"bitween": 1}}}
+            "kinds": ["processor"], "contracts": {"orders": 1}}}
         decoded = _wire.decode("AdapterFrame", _wire.encode("AdapterFrame", frame))
         self.assertEqual(frame, decoded)
 

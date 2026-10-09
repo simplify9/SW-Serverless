@@ -18,9 +18,9 @@ using System.Threading.Tasks;
 namespace SW.Serverless.UnitTests
 {
     /// <summary>
-    /// Adapters written in JavaScript and TypeScript with @simplyworks/serverless, built by serverless
-    /// build and run by the real host: classic sessions as Bitween runs handlers, resident instances,
-    /// and the Bitween kinds written with @simplyworks/bitween — the validator in TypeScript.
+    /// Adapters written in JavaScript and TypeScript with @simplyworks/sw-serverless, built by
+    /// sw-serverless build and run by the real host: classic sessions, resident instances, and
+    /// adapters implementing the tests' sample "orders" contract — one of them in TypeScript.
     /// </summary>
     [TestClass]
     public class NodeAdapterTests
@@ -32,9 +32,9 @@ namespace SW.Serverless.UnitTests
         {
             ("test.node.classic", "classic.js", "classic"),
             ("test.node.resident", "resident.js", "resident"),
-            ("test.node.handler", "bitween_handler.js", "classic"),
-            ("test.node.receiver", "bitween_receiver.js", "classic"),
-            ("test.node.validator", "bitween_validator.ts", "classic"),
+            ("test.node.processor", "orders_processor.js", "classic"),
+            ("test.node.source", "orders_source.js", "classic"),
+            ("test.node.tsprocessor", "orders_processor.ts", "classic"),
         };
 
         [ClassInitialize]
@@ -235,78 +235,55 @@ namespace SW.Serverless.UnitTests
             Assert.IsFalse(residents.Describe().Any(d => d.InstanceKey == "nd-resident"));
         }
 
-        [TestMethod]
-        public async Task A_bitween_handler_in_javascript_takes_and_returns_exchange_files_as_dotnet_ones()
+        [DataTestMethod]
+        [DataRow("test.node.processor")]
+        [DataRow("test.node.tsprocessor")]
+        public async Task An_orders_processor_in_javascript_or_typescript_takes_and_returns_json_objects(string adapter)
         {
-            var answer = await InSession("test.node.handler", new Dictionary<string, string> { ["Partner"] = "acme" }, s =>
-                s.InvokeAsync<JObject>("Handle", new { Data = "{\"orderId\":\"SO-1\"}", Filename = "order.json", BadData = false }));
+            if (adapter.Contains("ts")) NodePackage.RequireTypeStripping();
+            var receipt = await InSession(adapter, new Dictionary<string, string> { ["Partner"] = "acme" }, s =>
+                s.InvokeAsync<JObject>("Process", new { OrderId = "SO-1", Lines = 2 }));
+            Assert.IsTrue((bool)receipt["Accepted"]);
+            Assert.AreEqual("acme:SO-1", (string)receipt["Reference"]);
 
-            Assert.AreEqual("answer.json", (string)answer["Filename"]);
-            Assert.IsFalse((bool)answer["BadData"]);
-            var data = JObject.Parse((string)answer["Data"]);
-            Assert.AreEqual("acme", (string)data["to"]);
-            Assert.AreEqual("SO-1", (string)data["orderId"]);
-            Assert.AreEqual("order.json", (string)data["from"]);
-            // Hash is what .NET's ExchangeFile computes: SHA-1 of Data, lower-case hex.
-            using var sha1 = System.Security.Cryptography.SHA1.Create();
-            Assert.AreEqual(Convert.ToHexString(sha1.ComputeHash(Encoding.UTF8.GetBytes((string)answer["Data"]))).ToLowerInvariant(),
-                (string)answer["Hash"]);
-
-            var rejected = await InSession("test.node.handler", new Dictionary<string, string> { ["Partner"] = "acme" }, s =>
-                s.InvokeAsync<JObject>("Handle", new { Data = "{\"reject\":true}" }));
-            Assert.IsTrue((bool)rejected["BadData"], "a rejected delivery is returned, not raised");
+            var refused = await InSession(adapter, new Dictionary<string, string> { ["Partner"] = "acme" }, s =>
+                s.InvokeAsync<JObject>("Process", new { OrderId = "SO-2" }));
+            Assert.IsFalse((bool)refused["Accepted"]);
         }
 
         [TestMethod]
-        public async Task A_bitween_validator_in_typescript_reports_each_failure()
+        public async Task An_orders_source_in_javascript_runs_a_session_in_the_contract_s_order()
         {
-            NodePackage.RequireTypeStripping();
-            var result = await InSession("test.node.validator", null, s =>
-                s.InvokeAsync<JObject>("Validate", new { Data = "{\"lines\":[]}" }));
-
-            Assert.IsFalse((bool)result["Success"]);
-            CollectionAssert.AreEqual(new[] { "orderId", "lines" },
-                result["Validations"]!.Select(v => (string)v["Key"]).ToArray());
-
-            var valid = await InSession("test.node.validator", null, s =>
-                s.InvokeAsync<JObject>("Validate", new { Data = "{\"orderId\":\"SO-1\",\"lines\":[1]}" }));
-            Assert.IsTrue((bool)valid["Success"]);
-        }
-
-        [TestMethod]
-        public async Task A_bitween_receiver_in_javascript_runs_a_session_in_the_contract_s_order()
-        {
-            var root = Path.Combine(workDirectory, "receiver");
+            var root = Path.Combine(workDirectory, "source");
             var folder = Path.Combine(root, "inbox");
             Directory.CreateDirectory(folder);
-            File.WriteAllText(Path.Combine(folder, "a.json"), "{\"n\":1}");
-            File.WriteAllText(Path.Combine(folder, "b.json"), "{\"n\":2}");
+            File.WriteAllText(Path.Combine(folder, "a"), "1");
+            File.WriteAllText(Path.Combine(folder, "b"), "22");
 
-            var taken = await InSession("test.node.receiver", new Dictionary<string, string> { ["Folder"] = folder }, async s =>
+            var taken = await InSession("test.node.source", new Dictionary<string, string> { ["Folder"] = folder }, async s =>
             {
                 var got = new List<string>();
-                await s.InvokeAsync("Initialize", null);
-                foreach (var id in await s.InvokeAsync<string[]>("ListFiles", null))
+                await s.InvokeAsync("Open", null);
+                foreach (var id in await s.InvokeAsync<string[]>("List", null))
                 {
-                    var file = await s.InvokeAsync<JObject>("GetFile", id);
-                    got.Add((string)file["Filename"] + "=" + (string)file["Data"]);
-                    await s.InvokeAsync("DeleteFile", id);
+                    var order = await s.InvokeAsync<JObject>("Fetch", id);
+                    got.Add((string)order["OrderId"] + "=" + (int)order["Lines"]);
+                    await s.InvokeAsync("Remove", id);
                 }
-                await s.InvokeAsync("Finalize", null);
+                await s.InvokeAsync("Close", null);
                 return got;
             });
 
-            CollectionAssert.AreEqual(new[] { "a.json={\"n\":1}", "b.json={\"n\":2}" }, taken);
+            CollectionAssert.AreEqual(new[] { "a=1", "b=2" }, taken);
             Assert.AreEqual(0, Directory.GetFiles(folder).Length);
-            Assert.AreEqual("Initialize,ListFiles,GetFile,DeleteFile,GetFile,DeleteFile,Finalize",
-                File.ReadAllText(Path.Combine(root, "calls.txt")));
+            Assert.AreEqual("Open,List,Fetch,Remove,Fetch,Remove,Close", File.ReadAllText(Path.Combine(root, "calls.txt")));
         }
 
         [TestMethod]
         public async Task A_node_adapter_describes_itself_for_the_manifest_and_typescript_runs_as_javascript()
         {
             NodePackage.RequireTypeStripping();
-            var (zip, entry) = await NodePackage.BuildAsync(workDirectory, "test.node.describe", "bitween_validator.ts");
+            var (zip, entry) = await NodePackage.BuildAsync(workDirectory, "test.node.describe", "orders_processor.ts");
             Assert.AreEqual("main.js", entry, "the TypeScript entry runs as the JavaScript Node strips it to");
 
             using var archive = ZipFile.OpenRead(zip);
@@ -314,16 +291,16 @@ namespace SW.Serverless.UnitTests
             Assert.AreEqual("node", manifest.Runtime);
             Assert.AreEqual("typescript", manifest.Language);
             Assert.AreEqual(2, manifest.Protocol.Min);
-            CollectionAssert.AreEqual(new[] { "validator" }, manifest.Kinds);
-            Assert.AreEqual(1, manifest.Contracts["bitween"]);
-            Assert.IsNotNull(archive.GetEntry("node_modules/@simplyworks/serverless/src/index.js"));
-            Assert.IsNotNull(archive.GetEntry("node_modules/@simplyworks/bitween/src/index.js"));
+            CollectionAssert.AreEqual(new[] { "processor" }, manifest.Kinds);
+            Assert.AreEqual(1, manifest.Contracts["orders"]);
+            Assert.AreEqual("Partner", manifest.Properties.Single().Name);
+            Assert.IsNotNull(archive.GetEntry("node_modules/@simplyworks/sw-serverless/src/index.js"));
             Assert.IsNull(archive.GetEntry("main.ts"), "the package runs JavaScript");
             Assert.IsNotNull(archive.GetEntry("source/main.ts"), "the source is what was written");
         }
     }
 
-    /// <summary>A Node adapter's project — the script as main.js or main.ts, and its adapter.json — built by serverless build.</summary>
+    /// <summary>A Node adapter's project — the script as main.js or main.ts, and its adapter.json — built by sw-serverless build.</summary>
     static class NodePackage
     {
         static readonly Lazy<bool> canStripTypes = new(() =>

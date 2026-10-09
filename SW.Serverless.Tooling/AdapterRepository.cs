@@ -23,7 +23,7 @@ namespace SW.Serverless.Tooling
         public string IconDataUri { get; set; }
     }
 
-    /// <summary>One row of <c>serverless versions</c>.</summary>
+    /// <summary>One row of <c>sw-serverless versions</c>.</summary>
     public class VersionRow
     {
         public string Version { get; set; }
@@ -46,13 +46,13 @@ namespace SW.Serverless.Tooling
     /// <summary>
     /// The adapters layout in storage, and the only code in the installer that writes to it.
     ///
-    /// The layout is a contract with ten production deployments running hosts and Bitween builds
-    /// older than the catalog, so it is held to three rules:
+    /// The layout is a contract with production deployments running hosts — and applications that
+    /// list adapters from storage — older than the catalog, so it is held to three rules:
     /// <list type="number">
     /// <item><c>adapters/{id}</c> always holds whatever is current, with the full metadata an old
     /// host needs to run it (EntryAssembly and Hash at least).</item>
-    /// <item>Nothing but <c>adapters/{id}</c> is ever written under <c>adapters/</c> — older Bitween
-    /// lists every key there as an adapter. Versions an older installer put at
+    /// <item>Nothing but <c>adapters/{id}</c> is ever written under <c>adapters/</c> — older
+    /// listings take every key there for an adapter. Versions an older installer put at
     /// <c>adapters/{id}/{version}</c> are read, never written.</item>
     /// <item>Everything new lives beside it: versions under <c>adapters-versions/</c>, the catalog
     /// under <c>adapters-catalog/</c>. Nothing old reads either.</item>
@@ -258,7 +258,7 @@ namespace SW.Serverless.Tooling
             log(promote
                 ? $"Version {version} of '{adapterId}' is published and current."
                 : $"Version {version} of '{adapterId}' is published; '{adapterId}' still runs " +
-                  $"{(entry.Current ?? "its unversioned package")}. Run 'serverless promote {adapterId} {version}' to switch.");
+                  $"{(entry.Current ?? "its unversioned package")}. Run 'sw-serverless promote {adapterId} {version}' to switch.");
         }
 
         /// <summary>

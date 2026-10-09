@@ -2,7 +2,7 @@
 /**
  * Write SW-Serverless adapters in JavaScript or TypeScript, on Node 22 or later.
  *
- *   const sw = require("@simplyworks/serverless");
+ *   const sw = require("@simplyworks/sw-serverless");
  *
  *   class Greeter {
  *     static commands = {
@@ -26,7 +26,7 @@ const readline = require("node:readline");
 const { AsyncLocalStorage } = require("node:async_hooks");
 const wire = require("./wire");
 
-const SDK_VERSION = "10.1.0";
+const SDK_VERSION = "10.2.0";
 const SDK_LANGUAGE = "node";
 const PROTOCOL = 2;
 const ATTACH = "/sw.serverless.v1.AdapterHost/Attach";
@@ -55,7 +55,7 @@ const callStorage = new AsyncLocalStorage();
 
 /**
  * Declares a setting the adapter reads. Required unless it has a default or `required: false` says
- * otherwise. A secret is masked wherever Bitween shows it. Declaring a name again replaces it.
+ * otherwise. A secret is masked wherever a host application shows it. Declaring a name again replaces it.
  */
 function expect(name, options = {}) {
   if (!name || typeof name !== "string") throw new TypeError("a setting needs a name");
@@ -189,7 +189,7 @@ class Stream {
     this.session.on("connect", () => { try { this.session.setLocalWindowSize(16 * 1024 * 1024); } catch {} });
     this.call = this.session.request({
       ":method": "POST", ":path": ATTACH, "content-type": "application/grpc", te: "trailers",
-      "user-agent": "simplyworks-serverless-node",
+      "user-agent": "sw-serverless-node",
     });
     this.buffer = Buffer.alloc(0);
     this.waiting = [];

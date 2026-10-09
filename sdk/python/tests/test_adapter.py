@@ -2,8 +2,8 @@ import dataclasses
 import json
 import unittest
 
-import simplyworks_serverless as sw
-from simplyworks_serverless import _adapter, _types
+import sw_serverless as sw
+from sw_serverless import _adapter, _types
 
 
 @dataclasses.dataclass
@@ -80,6 +80,22 @@ class DescribeTests(unittest.TestCase):
                 pass
         described = sw.describe(NeedsArgs)
         self.assertEqual(1, len(described["warnings"]))
+
+    def test_a_class_says_which_contract_and_kinds_it_implements(self):
+        @sw.implements("orders", 1, "processor")
+        class Processor:
+            @sw.command("Process")
+            def process(self, order: dict) -> dict:
+                return order
+
+        @sw.implements("audit", 2, "sink")
+        class Both(Processor):
+            pass
+
+        self.assertEqual({"orders": 1}, sw.describe(Processor)["contracts"])
+        self.assertEqual(["processor"], sw.describe(Processor)["kinds"])
+        self.assertEqual({"orders": 1, "audit": 2}, sw.describe(Both)["contracts"])
+        self.assertEqual(["sink", "processor"], sw.describe(Both)["kinds"])
 
     def test_a_command_takes_at_most_one_argument(self):
         class TwoArgs:

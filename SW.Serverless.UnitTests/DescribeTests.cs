@@ -80,8 +80,8 @@ namespace SW.Serverless.UnitTests
         {
             var d = Describe("SW.Serverless.UnitTests.GrpcClassicAdapter");
 
-            Assert.AreEqual(1, d.Contracts["bitween"]);
-            CollectionAssert.AreEqual(new[] { "handler" }, d.Kinds);
+            Assert.AreEqual(1, d.Contracts["orders"]);
+            CollectionAssert.AreEqual(new[] { "processor" }, d.Kinds);
             Assert.AreEqual("hello ", d.Settings.Single(s => s.Name == "Prefix").Default);
             Assert.AreEqual(0, d.Warnings.Count, string.Join("; ", d.Warnings));
         }

@@ -1,0 +1,42 @@
+{
+  "contract": "orders",
+  "version": 1,
+  "description": "A sample contract for the tests: what an order-processing application calls on its adapters. Shaped like any application's contract, so the kit's handling of kinds, payloads, sessions and destructive methods is tested without depending on a real one.",
+  "encoding": {
+    "string": "A string argument or result is the raw UTF-8 text, not a JSON string.",
+    "object": "Any other argument or result is JSON, with property names exactly as its schema gives them.",
+    "none": "A method with no argument receives an empty payload; one with no result returns an empty payload."
+  },
+  "types": {
+    "Order": { "schema": "order.schema.json" },
+    "Receipt": { "schema": "receipt.schema.json" },
+    "OrderId": { "encoding": "string", "description": "An id a source gave in List, passed back exactly as given." },
+    "OrderIdList": { "schema": { "type": "array", "items": { "type": "string" } } }
+  },
+  "kinds": {
+    "processor": {
+      "description": "Takes an order and says whether it was accepted.",
+      "methods": [
+        {
+          "name": "Process",
+          "input": "Order",
+          "output": "Receipt",
+          "examples": [
+            { "OrderId": "SO-1001", "Lines": 2 }
+          ]
+        }
+      ]
+    },
+    "source": {
+      "description": "Where orders come from, read in one session per run.",
+      "session": "Open, List, then for each order Fetch and — once it is safely taken — Remove, and finally Close, which is also called after a failure.",
+      "methods": [
+        { "name": "Open", "input": null, "output": null },
+        { "name": "List", "input": null, "output": "OrderIdList" },
+        { "name": "Fetch", "input": "OrderId", "output": "Order" },
+        { "name": "Remove", "input": "OrderId", "output": null, "destructive": true },
+        { "name": "Close", "input": null, "output": null }
+      ]
+    }
+  }
+}

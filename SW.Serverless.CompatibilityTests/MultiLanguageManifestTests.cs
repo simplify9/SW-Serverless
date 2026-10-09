@@ -8,7 +8,7 @@ namespace SW.Serverless.CompatibilityTests;
 /// <summary>
 /// The manifest fields multi-language adapters add — runtime version, platforms and their entries,
 /// contracts, the source the package carries — written by the current tools and read by the
-/// manifest parser released Bitween uses (SimplyWorks.Serverless.Contract 10.0.2). That parser
+/// first published manifest parser (SimplyWorks.Serverless.Contract 10.0.2), which deployed applications use. That parser
 /// must keep every one of them, find nothing wrong, and still see the fields it knows as before.
 /// </summary>
 [TestClass]
@@ -27,7 +27,7 @@ public class MultiLanguageManifestTests
         Lifecycle = AdapterManifest.ClassicLifecycle,
         Platforms = new() { "linux-x64", "linux-arm64" },
         Entries = new() { ["linux-x64"] = "x64/main.py", ["linux-arm64"] = "arm64/main.py" },
-        Contracts = new() { ["bitween"] = 1 },
+        Contracts = new() { ["orders"] = 1 },
         Source = new AdapterSource
         {
             Files = new() { ["main.py"] = new string('a', 64), ["requirements.lock"] = new string('b', 64) },
@@ -72,7 +72,7 @@ public class MultiLanguageManifestTests
         CollectionAssert.AreEqual(new[] { "linux-x64", "linux-arm64" }, again.Platforms);
         Assert.AreEqual("arm64/main.py", again.EntryFor("linux-arm64"));
         Assert.AreEqual("main.py", again.EntryFor("osx-arm64"), "a platform without its own entry uses the default");
-        Assert.AreEqual(1, again.Contracts!["bitween"]);
+        Assert.AreEqual(1, again.Contracts!["orders"]);
         Assert.AreEqual(AdapterSource.DefaultPath, again.Source!.Path);
         Assert.AreEqual(2, again.Source.Files.Count);
         Assert.IsNull(again.Extensions, "nothing unknown to the current parser");
@@ -95,7 +95,7 @@ public class MultiLanguageManifestTests
     [DataRow("""{ "platforms": ["Linux x64"] }""", "platform")]
     [DataRow("""{ "platforms": ["linux-x64"], "entries": { "osx-arm64": "a" } }""", "doesn't list")]
     [DataRow("""{ "platforms": ["linux-x64"], "entries": { "linux-x64": "../../etc/passwd" } }""", "inside the package")]
-    [DataRow("""{ "contracts": { "bitween": 0 } }""", "contract")]
+    [DataRow("""{ "contracts": { "orders": 0 } }""", "contract")]
     [DataRow("""{ "source": { "files": { "main.py": "not-a-hash" } } }""", "SHA-256")]
     [DataRow("""{ "source": { "path": "/abs", "files": {} } }""", "source.path")]
     public void A_wrong_new_field_is_named_by_validation(string json, string expected)

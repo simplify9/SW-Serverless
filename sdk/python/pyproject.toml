@@ -3,8 +3,8 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "simplyworks-serverless"
-version = "10.1.0"
+name = "sw-serverless"
+version = "10.2.0"
 description = "Write SW-Serverless adapters in Python: settings, commands, and the host protocol, with no dependencies."
 readme = "README.md"
 requires-python = ">=3.12"

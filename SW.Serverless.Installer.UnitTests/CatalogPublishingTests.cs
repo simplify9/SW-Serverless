@@ -149,7 +149,7 @@ public class CatalogPublishingTests
     static void AssertLegacyMetadata(IReadOnlyDictionary<string, string> metadata, string? version)
     {
         foreach (var key in LegacyKeys)
-            Assert.IsTrue(metadata.ContainsKey(key), $"adapters/{{id}} is missing the {key} metadata an older host or Bitween reads");
+            Assert.IsTrue(metadata.ContainsKey(key), $"adapters/{{id}} is missing the {key} metadata an older host or listing reads");
         Assert.AreEqual(Classic + ".dll", metadata["EntryAssembly"]);
         Assert.AreEqual("dotnet", metadata["Lang"]);
         Assert.IsFalse(string.IsNullOrWhiteSpace(metadata["Hash"]), "every host requires Hash");
@@ -657,10 +657,10 @@ public class CatalogPublishingTests
         Assert.AreEqual("1.2.1", (await Publish("legacy.adapter", "patch", promote: false)).Version);
     }
 
-    // ---------------------------------------------------------------- what older hosts and Bitween see
+    // ---------------------------------------------------------------- what older hosts and listings see
 
     /// <summary>
-    /// Older Bitween lists every key under adapters/ as an adapter, so after anything this installer
+    /// Older listings take every key under adapters/ for an adapter, so after anything this installer
     /// does, the only key there must be adapters/{id}.
     /// </summary>
     [TestMethod]
@@ -728,7 +728,7 @@ public class CatalogPublishingTests
         Directory.CreateDirectory(project);
         File.WriteAllText(Path.Combine(project, "adapter.json"), """{ "id": "acme.py", "version": "1.0.0", "runtime": "python", "entry": "main.py" }""");
         File.WriteAllText(Path.Combine(project, "main.py"), """
-            import simplyworks_serverless as sw
+            import sw_serverless as sw
 
             class Echo:
                 @sw.command("Echo")

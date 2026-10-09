@@ -61,9 +61,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SW.Serverless.UnitTests.Grp
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SW.Serverless.Tooling", "SW.Serverless.Tooling\SW.Serverless.Tooling.csproj", "{C7FCE2D1-D9D6-4E34-BBB2-A94B4B679D77}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SW.Serverless.UnitTests.BitweenHandler", "SW.Serverless.UnitTests.BitweenHandler\SW.Serverless.UnitTests.BitweenHandler.csproj", "{DCF81A88-37CA-4746-A4D8-EADEF00422FD}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SW.Serverless.UnitTests.OrdersProcessor", "SW.Serverless.UnitTests.OrdersProcessor\SW.Serverless.UnitTests.OrdersProcessor.csproj", "{DCF81A88-37CA-4746-A4D8-EADEF00422FD}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SW.Serverless.UnitTests.BitweenReceiver", "SW.Serverless.UnitTests.BitweenReceiver\SW.Serverless.UnitTests.BitweenReceiver.csproj", "{4D824901-1889-4BB2-9F72-2D33E5CFA7B3}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SW.Serverless.UnitTests.OrdersSource", "SW.Serverless.UnitTests.OrdersSource\SW.Serverless.UnitTests.OrdersSource.csproj", "{4D824901-1889-4BB2-9F72-2D33E5CFA7B3}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

@@ -14,7 +14,7 @@ namespace SW.Serverless.Samples.RabbitMq.Publisher
     /// messages a second, enough to make throughput and backpressure visible rather than
     /// theoretical.
     ///
-    /// This is the direction Bitween does not have yet even on the internal gateway. The adapter
+    /// The adapter
     /// owns the connection and the confirm handling; the host only says what to send.
     /// </summary>
     public class PublisherHandler : RabbitAdapterBase

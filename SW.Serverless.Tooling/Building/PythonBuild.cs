@@ -14,9 +14,10 @@ using SW.Serverless.Contract.Catalog;
 namespace SW.Serverless.Tooling.Building
 {
     /// <summary>
-    /// serverless build for a Python adapter. Python runs from its source, so the package is the
+    /// sw-serverless build for a Python adapter. Python runs from its source, so the package is the
     /// adapter's files as they are, with what they import vendored under <see cref="VendorFolder"/>:
-    /// the SDK and the Bitween kinds from copies this tool carries — no PyPI, no network — and
+    /// the SDK from the copy this tool carries, and any packages the request hands it — no PyPI, no
+    /// network — and
     /// whatever requirements.txt names, through pip. A small entry script puts the vendored code on
     /// the path and runs the adapter's own entry.
     /// </summary>
@@ -37,7 +38,8 @@ namespace SW.Serverless.Tooling.Building
         public static readonly IReadOnlyList<string> DefaultNativePlatforms = new[] { "linux-x64", "linux-arm64" };
 
         /// <summary>The SDKs the build vendors itself; requirements.txt naming them is not sent to pip.</summary>
-        static readonly string[] OwnPackages = { "simplyworks-serverless", "simplyworks_serverless", "simplyworks-bitween", "simplyworks_bitween" };
+        /// <summary>The SDK, which the build vendors itself; requirements.txt naming it is not sent to pip.</summary>
+        static readonly string[] OwnPackages = { "sw-serverless", "sw_serverless" };
 
         // pip's platform tags for each platform a manifest can name.
         static readonly Dictionary<string, string[]> PipPlatforms = new(StringComparer.OrdinalIgnoreCase)
@@ -83,6 +85,7 @@ namespace SW.Serverless.Tooling.Building
 
             var vendor = Path.Combine(packageDirectory, VendorFolder);
             WriteOwnPackages(vendor);
+            WritePackages(request, AdapterManifest.PythonRuntime, vendor);
 
             var (platforms, describeOnly) = await VendorRequirementsAsync(request, project, author, vendor, result);
             if (!result.Succeeded) return;
@@ -94,7 +97,7 @@ namespace SW.Serverless.Tooling.Building
                 AdapterManifest.PythonRuntime, request.Runtimes);
             if (description == null)
             {
-                result.Problems.Add($"{problem}. A Python adapter describes itself through simplyworks_serverless.run(); make sure {entry} calls it");
+                result.Problems.Add($"{problem}. A Python adapter describes itself through sw_serverless.run(); make sure {entry} calls it");
                 return;
             }
             result.Warnings.AddRange(description.Warnings);
@@ -115,7 +118,7 @@ namespace SW.Serverless.Tooling.Building
             {
                 manifest.Source = new AdapterSource
                 {
-                    BuildCommand = "serverless build",
+                    BuildCommand = "sw-serverless build",
                     Lockfiles = source.Keys.Where(k => PackageBuilder.IsLockfile(k)).OrderBy(k => k).ToList(),
                 };
                 var sourceDirectory = Path.Combine(packageDirectory, AdapterSource.DefaultPath);
@@ -147,7 +150,21 @@ namespace SW.Serverless.Tooling.Building
             result.ZipPath = zip;
         }
 
-        /// <summary>The SDK and the Bitween kinds, as this tool carries them, under <paramref name="vendor"/>.</summary>
+        /// <summary>The packages the request hands the build for <paramref name="runtime"/>, under <paramref name="root"/>.</summary>
+        internal static void WritePackages(BuildRequest request, string runtime, string root)
+        {
+            foreach (var package in request.Packages.Where(p => string.Equals(p.Runtime, runtime, StringComparison.OrdinalIgnoreCase)))
+                foreach (var (path, bytes) in package.Files)
+                {
+                    var target = Path.GetFullPath(Path.Combine(root, path.Replace('\\', '/')));
+                    if (!target.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                        throw new ArgumentException($"{package.Name} names {path}, outside the folder packages go in.");
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    File.WriteAllBytes(target, bytes);
+                }
+        }
+
+        /// <summary>The SDK, as this tool carries it, under <paramref name="vendor"/>.</summary>
         public static void WriteOwnPackages(string vendor)
         {
             var assembly = typeof(PythonBuild).Assembly;
@@ -175,7 +192,7 @@ namespace SW.Serverless.Tooling.Building
             if (!File.Exists(requirementsFile)) return (author.Platforms is { Count: > 0 } ? author.Platforms : null, null);
 
             var lines = (await File.ReadAllLinesAsync(requirementsFile))
-                .Where(l => !IsOwnPackage(l))
+                .Where(l => !IsProvided(l, request))
                 .ToList();
             if (!lines.Any(l => !string.IsNullOrWhiteSpace(l) && !l.TrimStart().StartsWith('#')))
                 return (author.Platforms is { Count: > 0 } ? author.Platforms : null, null);
@@ -257,11 +274,16 @@ namespace SW.Serverless.Tooling.Building
             new[] { "--only-binary=:all:", "--python-version", TargetPythonVersion, "--implementation", "cp" }
                 .Concat(PipPlatforms[platform].SelectMany(tag => new[] { "--platform", tag }));
 
-        static bool IsOwnPackage(string line)
+        /// <summary>Whether a requirements line names the SDK or a package the request vendors, which pip isn't asked for.</summary>
+        static bool IsProvided(string line, BuildRequest request)
         {
-            var name = Regex.Match(line.Trim(), @"^[A-Za-z0-9_.\-]+").Value;
-            return OwnPackages.Contains(name, StringComparer.OrdinalIgnoreCase);
+            var name = Normalize(Regex.Match(line.Trim(), @"^[A-Za-z0-9_.\-]+").Value);
+            return name.Length > 0 && (OwnPackages.Any(o => Normalize(o) == name) ||
+                                       request.Packages.Any(p => string.Equals(p.Runtime, AdapterManifest.PythonRuntime, StringComparison.OrdinalIgnoreCase) && Normalize(p.Name) == name));
         }
+
+        // PyPI treats -, _ and . alike, and case as nothing.
+        static string Normalize(string name) => Regex.Replace(name ?? "", "[-_.]+", "-").ToLowerInvariant();
 
         static async Task<(bool Ok, string Output)> PipAsync(BuildRequest request, string[] arguments)
         {
@@ -288,7 +310,7 @@ namespace SW.Serverless.Tooling.Building
         /// when requirements were vendored per platform — and runs the adapter's own entry as __main__.
         /// </summary>
         internal static string Bootstrap(string entry) => $$"""
-            # Written by serverless build. Puts the vendored packages on the path and runs {{entry}}.
+            # Written by sw-serverless build. Puts the vendored packages on the path and runs {{entry}}.
             import os, platform, runpy, sys
 
             here = os.path.dirname(os.path.abspath(__file__))

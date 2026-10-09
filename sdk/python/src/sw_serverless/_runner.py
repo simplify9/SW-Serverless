@@ -19,7 +19,7 @@ import traceback
 from . import _adapter, _types, _wire
 from ._http2 import GrpcStream
 
-SDK_VERSION = "10.1.0"
+SDK_VERSION = "10.2.0"
 SDK_LANGUAGE = "python"
 PROTOCOL = 2
 ATTACH = "/sw.serverless.v1.AdapterHost/Attach"
@@ -344,7 +344,7 @@ class Runner:
             try:
                 await asyncio.wait_for(_call(stop), max(0.1, deadline - time.monotonic()))
             except Exception:
-                logging.getLogger("simplyworks_serverless").warning("stop() failed", exc_info=True)
+                logging.getLogger("sw_serverless").warning("stop() failed", exc_info=True)
         running = [task for task, _ in list(self._running.values())]
         if running:
             await asyncio.wait(running, timeout=max(0.1, deadline - time.monotonic()))

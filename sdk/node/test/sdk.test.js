@@ -9,14 +9,14 @@ test("a frame round-trips with every kind of field", () => {
     id: 42, hello: {
       token: "t", protocol_version: 2, capabilities: ["cancel", "command:Greet"],
       commands: [{ name: "Greet", returns_value: true, input_schema: '{"type":"string"}' }],
-      settings: [{ name: "Url", required: true, secret: true }], kinds: ["handler"], contracts: { bitween: 1 },
+      settings: [{ name: "Url", required: true, secret: true }], kinds: ["processor"], contracts: { orders: 1 },
     },
   };
   assert.deepStrictEqual(wire.decode("AdapterFrame", wire.encode("AdapterFrame", frame)), frame);
 });
 
 test("the bytes are the Python SDK's, and .NET's protobuf", () => {
-  // Written by simplyworks_serverless._wire for the same frame.
+  // Written by sw_serverless._wire for the same frame.
   const frame = { id: -7, metric: { name: "m", value: 2.5, tags: { a: "b" } } };
   assert.strictEqual(wire.encode("AdapterFrame", frame).toString("hex"),
     "08f9ffffffffffffffff013a140a016d1100000000000004401a060a0161120162");

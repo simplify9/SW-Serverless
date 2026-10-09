@@ -18,10 +18,10 @@ using System.Threading.Tasks;
 namespace SW.Serverless.UnitTests
 {
     /// <summary>
-    /// Adapters written in Python with simplyworks-serverless, run by the real host: classic
-    /// sessions as Bitween runs handlers, resident instances, and the Bitween kinds written with
-    /// simplyworks-bitween. The SDK has no dependencies, so a package is the adapter's files and
-    /// the SDK's, vendored beside them — what serverless build makes.
+    /// Adapters written in Python with sw-serverless, run by the real host: classic sessions, one
+    /// call at a time, resident instances, and adapters implementing the tests' sample "orders"
+    /// contract. The SDK has no dependencies, so a package is the adapter's files and the SDK's,
+    /// vendored beside them — what sw-serverless build makes.
     /// </summary>
     [TestClass]
     public class PythonAdapterTests
@@ -33,9 +33,8 @@ namespace SW.Serverless.UnitTests
         {
             ("test.python.classic", "classic.py", "classic"),
             ("test.python.resident", "resident.py", "resident"),
-            ("test.python.handler", "bitween_handler.py", "classic"),
-            ("test.python.receiver", "bitween_receiver.py", "classic"),
-            ("test.python.validator", "bitween_validator.py", "classic"),
+            ("test.python.processor", "orders_processor.py", "classic"),
+            ("test.python.source", "orders_source.py", "classic"),
         };
 
         [ClassInitialize]
@@ -235,76 +234,51 @@ namespace SW.Serverless.UnitTests
         }
 
         [TestMethod]
-        public async Task A_bitween_handler_in_python_takes_and_returns_exchange_files_as_dotnet_ones()
+        public async Task An_orders_processor_in_python_takes_and_returns_json_objects()
         {
-            var answer = await InSession("test.python.handler", new Dictionary<string, string> { ["Partner"] = "acme" }, s =>
-                s.InvokeAsync<JObject>("Handle", new { Data = "{\"orderId\":\"SO-1\"}", Filename = "order.json", BadData = false }));
+            var receipt = await InSession("test.python.processor", new Dictionary<string, string> { ["Partner"] = "acme" }, s =>
+                s.InvokeAsync<JObject>("Process", new { OrderId = "SO-1", Lines = 2 }));
+            Assert.IsTrue((bool)receipt["Accepted"]);
+            Assert.AreEqual("acme:SO-1", (string)receipt["Reference"]);
 
-            Assert.AreEqual("answer.json", (string)answer["Filename"]);
-            Assert.IsFalse((bool)answer["BadData"]);
-            var data = JObject.Parse((string)answer["Data"]);
-            Assert.AreEqual("acme", (string)data["to"]);
-            Assert.AreEqual("SO-1", (string)data["orderId"]);
-            Assert.AreEqual("order.json", (string)data["from"]);
-            // Hash is what .NET's ExchangeFile computes: SHA-1 of Data, lower-case hex.
-            using var sha1 = System.Security.Cryptography.SHA1.Create();
-            Assert.AreEqual(Convert.ToHexString(sha1.ComputeHash(Encoding.UTF8.GetBytes((string)answer["Data"]))).ToLowerInvariant(),
-                (string)answer["Hash"]);
-
-            var rejected = await InSession("test.python.handler", new Dictionary<string, string> { ["Partner"] = "acme" }, s =>
-                s.InvokeAsync<JObject>("Handle", new { Data = "{\"reject\":true}" }));
-            Assert.IsTrue((bool)rejected["BadData"], "a rejected delivery is returned, not raised");
+            var refused = await InSession("test.python.processor", new Dictionary<string, string> { ["Partner"] = "acme" }, s =>
+                s.InvokeAsync<JObject>("Process", new { OrderId = "SO-2" }));
+            Assert.IsFalse((bool)refused["Accepted"]);
         }
 
         [TestMethod]
-        public async Task A_bitween_validator_in_python_reports_each_failure()
+        public async Task An_orders_source_in_python_runs_a_session_in_the_contract_s_order()
         {
-            var result = await InSession("test.python.validator", null, s =>
-                s.InvokeAsync<JObject>("Validate", new { Data = "{\"lines\":[]}" }));
-
-            Assert.IsFalse((bool)result["Success"]);
-            CollectionAssert.AreEqual(new[] { "orderId", "lines" },
-                result["Validations"]!.Select(v => (string)v["Key"]).ToArray());
-
-            var valid = await InSession("test.python.validator", null, s =>
-                s.InvokeAsync<JObject>("Validate", new { Data = "{\"orderId\":\"SO-1\",\"lines\":[1]}" }));
-            Assert.IsTrue((bool)valid["Success"]);
-        }
-
-        [TestMethod]
-        public async Task A_bitween_receiver_in_python_runs_a_session_in_the_contract_s_order()
-        {
-            var root = Path.Combine(workDirectory, "receiver");
+            var root = Path.Combine(workDirectory, "source");
             var folder = Path.Combine(root, "inbox");
             Directory.CreateDirectory(folder);
-            File.WriteAllText(Path.Combine(folder, "a.json"), "{\"n\":1}");
-            File.WriteAllText(Path.Combine(folder, "b.json"), "{\"n\":2}");
+            File.WriteAllText(Path.Combine(folder, "a"), "1");
+            File.WriteAllText(Path.Combine(folder, "b"), "22");
 
-            var taken = await InSession("test.python.receiver", new Dictionary<string, string> { ["Folder"] = folder }, async s =>
+            var taken = await InSession("test.python.source", new Dictionary<string, string> { ["Folder"] = folder }, async s =>
             {
                 var got = new List<string>();
-                await s.InvokeAsync("Initialize", null);
-                foreach (var id in await s.InvokeAsync<string[]>("ListFiles", null))
+                await s.InvokeAsync("Open", null);
+                foreach (var id in await s.InvokeAsync<string[]>("List", null))
                 {
-                    var file = await s.InvokeAsync<JObject>("GetFile", id);
-                    got.Add((string)file["Filename"] + "=" + (string)file["Data"]);
-                    await s.InvokeAsync("DeleteFile", id);
+                    var order = await s.InvokeAsync<JObject>("Fetch", id);
+                    got.Add((string)order["OrderId"] + "=" + (int)order["Lines"]);
+                    await s.InvokeAsync("Remove", id);
                 }
-                await s.InvokeAsync("Finalize", null);
+                await s.InvokeAsync("Close", null);
                 return got;
             });
 
-            CollectionAssert.AreEqual(new[] { "a.json={\"n\":1}", "b.json={\"n\":2}" }, taken);
+            CollectionAssert.AreEqual(new[] { "a=1", "b=2" }, taken);
             Assert.AreEqual(0, Directory.GetFiles(folder).Length);
-            Assert.AreEqual("Initialize,ListFiles,GetFile,DeleteFile,GetFile,DeleteFile,Finalize",
-                File.ReadAllText(Path.Combine(root, "calls.txt")));
+            Assert.AreEqual("Open,List,Fetch,Remove,Fetch,Remove,Close", File.ReadAllText(Path.Combine(root, "calls.txt")));
         }
 
         [TestMethod]
         public async Task A_python_adapter_describes_itself_for_the_manifest()
         {
             var dir = Path.Combine(workDirectory, "describe");
-            using (var package = PythonPackage.Build("test.python.handler", "bitween_handler.py", "classic"))
+            using (var package = PythonPackage.Build("test.python.processor", "orders_processor.py", "classic"))
             using (var archive = new ZipArchive(package))
                 archive.ExtractToDirectory(dir);
 
@@ -315,19 +289,20 @@ namespace SW.Serverless.UnitTests
             Assert.AreEqual("python", description.SdkLanguage);
             Assert.AreEqual("classic", description.Lifecycle);
             Assert.AreEqual(2, description.Protocol.Min);
-            CollectionAssert.AreEqual(new[] { "handler" }, description.Kinds);
-            Assert.AreEqual(1, description.Contracts["bitween"]);
+            CollectionAssert.AreEqual(new[] { "processor" }, description.Kinds);
+            Assert.AreEqual(1, description.Contracts["orders"]);
             var partner = description.Settings.Single();
             Assert.AreEqual("Partner", partner.Name);
             Assert.IsTrue(partner.Required);
-            var handle = description.Commands.Single();
-            Assert.AreEqual("Handle", handle.Name);
-            Assert.AreEqual("ExchangeFile", handle.InputSchema!.Value.GetProperty("title").GetString());
+            var process = description.Commands.Single();
+            Assert.AreEqual("Process", process.Name);
+            Assert.AreEqual("object", process.InputSchema!.Value.GetProperty("type").GetString());
+            Assert.IsTrue(process.ReturnsValue);
         }
     }
 
     /// <summary>
-    /// A Python adapter packaged as serverless build packages one: the script as main.py, the SDKs
+    /// A Python adapter packaged as sw-serverless build packages one: the script as main.py, the SDK
     /// under _vendor/, and an entry that puts _vendor on the path before running main.py.
     /// </summary>
     static class PythonPackage
@@ -362,8 +337,7 @@ namespace SW.Serverless.UnitTests
 
                 archive.CreateEntryFromFile(Path.Combine(root, "SW.Serverless.UnitTests", "PythonAdapters", script), "main.py");
                 AddText(Entry, Bootstrap);
-                AddFolder(Path.Combine(root, "sdk", "python", "src", "simplyworks_serverless"), "_vendor/simplyworks_serverless");
-                AddFolder(Path.Combine(root, "..", "Bitween-api", "sdk", "python", "src", "simplyworks_bitween"), "_vendor/simplyworks_bitween");
+                AddFolder(Path.Combine(root, "sdk", "python", "src", "sw_serverless"), "_vendor/sw_serverless");
                 AddText("adapter.json", new JObject
                 {
                     ["id"] = id,

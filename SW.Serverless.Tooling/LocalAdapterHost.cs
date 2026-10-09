@@ -21,7 +21,7 @@ namespace SW.Serverless.Tooling
     /// <summary>
     /// An adapter package run on this machine exactly as a host runs one: put in a temporary store,
     /// installed from it, started on its runtime, classic or resident, and called by command name.
-    /// What serverless run and serverless test use.
+    /// What sw-serverless run and sw-serverless test use.
     /// </summary>
     public sealed class LocalAdapterHost : IAsyncDisposable
     {

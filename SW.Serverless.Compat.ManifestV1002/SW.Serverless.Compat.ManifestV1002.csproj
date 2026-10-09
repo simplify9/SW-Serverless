@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <!-- The manifest reader as published in SimplyWorks.Serverless.Contract 10.0.2, the first to
-         read manifests and what released Bitween reads them with. Never upgrade this reference:
+         read manifests and what deployed applications read them with. Never upgrade this reference:
          it is the old side of the compatibility tests. -->
     <PropertyGroup>
         <OutputType>Exe</OutputType>

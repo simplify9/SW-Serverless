@@ -41,7 +41,7 @@ namespace SW.Serverless.Installer
             });
 
             // A command is recognised before the publish parser sees anything, so every existing
-            // "serverless <project> <id>" line parses exactly as before. A project file that happens
+            // "sw-serverless <project> <id>" line parses exactly as before. A project file that happens
             // to be called "promote" is still a project.
             if (args.Length > 0 && Commands.Contains(args[0]) && !File.Exists(args[0]))
             {

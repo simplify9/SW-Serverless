@@ -3,8 +3,8 @@ syntax = "proto3";
 option csharp_namespace = "SW.Serverless.Contract";
 package sw.serverless.v1;
 
-// The ENVELOPE only. Command names and payload shapes belong to the host's own SDK
-// (SimplyWorks.TraxisGateway.Sdk, SW.Bitween.Sdk, ...), never to this file — see the
+// The ENVELOPE only. Command names and payload shapes belong to the host application (its
+// own SDK or contract package), never to this file — see the
 // design doc, section 14.6. Payloads are opaque bytes here on purpose.
 service AdapterHost {
 
@@ -51,7 +51,7 @@ message Invoke {
 
     // Configuration for THIS call, on top of the startup values the process was given.
     //
-    // An exclusive resident instance is shared: in Bitween one database connection serves every
+    // An exclusive resident instance is shared: one database connection can serve every
     // subscription bound to it, and each of those has its own settings — which statement to run,
     // which operation it is. Startup values cannot carry that, because they belong to the process
     // and the process belongs to all of them. This is the same reason session_id exists: a shared
@@ -129,11 +129,11 @@ message Hello {
     // UI needs to ask for before running it.
     repeated SettingInfo settings = 9;
 
-    // The kinds of adapter it implements for a contract, as that contract names them — for
-    // Bitween: handler, mapper, validator, receiver.
+    // The kinds of adapter it implements for a contract, as that contract names them — for an
+    // orders contract, say: processor, source.
     repeated string kinds = 10;
 
-    // The contracts it implements and their versions, e.g. bitween -> 1.
+    // The contracts it implements and their versions, e.g. orders -> 1.
     map<string, int32> contracts = 11;
 }
 

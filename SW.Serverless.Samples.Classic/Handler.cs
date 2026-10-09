@@ -8,8 +8,8 @@ using System.Threading.Tasks;
 namespace SW.Serverless.Samples.Classic
 {
     /// <summary>
-    /// A conventional per-invocation adapter — the shape the ~190 published Traxis and Bitween
-    /// adapters already use. Commands are public Task / Task&lt;T&gt; methods discovered by name;
+    /// A conventional per-invocation adapter — the shape most published adapters
+    /// already use. Commands are public Task / Task&lt;T&gt; methods discovered by name;
     /// configuration comes from startup values; logging goes through AdapterLogger.
     /// </summary>
     [AdapterKind("handler")]
@@ -147,8 +147,8 @@ namespace SW.Serverless.Samples.Classic
         }
 
         // ------------------------------------------------------------------ contracts
-        // In a real deployment these live in the HOST's SDK — SimplyWorks.TraxisGateway.Sdk,
-        // SW.Bitween.Sdk — never in SW.Serverless, which only ever sees opaque payloads.
+        // In a real deployment these live in the host application's own SDK or contract package —
+        // never in SW.Serverless, which only ever sees opaque payloads.
 
         public class Order
         {

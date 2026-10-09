@@ -1,11 +1,11 @@
-# simplyworks-serverless
+# sw-serverless
 
 Write SW-Serverless adapters in Python 3.12 or later. The package has no dependencies: it speaks the
 host's protocol — gRPC over a Unix socket — with the standard library alone, so it vendors into an
 adapter package as plain files, for any platform.
 
 ```python
-import simplyworks_serverless as sw
+import sw_serverless as sw
 
 
 class Greeter:

@@ -1,9 +1,9 @@
-"""A classic adapter in Python, called as Bitween calls handlers: one session, one call at a time."""
+"""A classic adapter in Python, called one session, one call at a time."""
 import asyncio
 import logging
 from dataclasses import dataclass
 
-import simplyworks_serverless as sw
+import sw_serverless as sw
 
 
 @dataclass

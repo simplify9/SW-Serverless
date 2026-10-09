@@ -1,5 +1,5 @@
 """A resident adapter in Python: started, kept running, asked for its status, reset and stopped."""
-import simplyworks_serverless as sw
+import sw_serverless as sw
 
 
 class Resident:
