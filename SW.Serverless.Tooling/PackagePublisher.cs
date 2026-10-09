@@ -4,7 +4,7 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 
-namespace SW.Serverless.Installer.Shared
+namespace SW.Serverless.Tooling
 {
     public class PublishRequest
     {

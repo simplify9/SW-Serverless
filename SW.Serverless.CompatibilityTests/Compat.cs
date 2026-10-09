@@ -8,7 +8,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SW.CloudFiles.Extensions;
 using SW.PrimitiveTypes;
 using SW.Serverless.Installer;
-using SW.Serverless.Installer.Shared;
+using SW.Serverless.Tooling;
 
 namespace SW.Serverless.CompatibilityTests;
 

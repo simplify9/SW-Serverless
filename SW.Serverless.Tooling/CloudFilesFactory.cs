@@ -8,8 +8,9 @@ using SW.CloudFiles.AS.Extensions;
 // GC, OC, S3 and LocalTests all publish their registration extensions into this one namespace.
 using SW.CloudFiles.Extensions;
 using SW.PrimitiveTypes;
+using SW.Serverless.Installer;
 
-namespace SW.Serverless.Installer.Shared
+namespace SW.Serverless.Tooling
 {
     /// <summary>
     /// Builds the storage provider an adapter is published to.

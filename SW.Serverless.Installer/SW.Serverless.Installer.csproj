@@ -9,16 +9,6 @@
 
   <ItemGroup>
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
-    <PackageReference Include="SimplyWorks.CloudFiles.AS" Version="10.0.0" />
-    <PackageReference Include="SimplyWorks.CloudFiles.AS.Extensions" Version="10.0.0" />
-    <PackageReference Include="SimplyWorks.CloudFiles.GC.Extensions" Version="10.0.0" />
-    <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="10.0.0" />
-    <PackageReference Include="SimplyWorks.CloudFiles.OC.Extensions" Version="10.0.0" />
-    <PackageReference Include="SimplyWorks.CloudFiles.S3" Version="10.0.0" />
-    <PackageReference Include="SimplyWorks.CloudFiles.OC" Version="10.0.0" />
-    <PackageReference Include="SimplyWorks.CloudFiles.S3.Extensions" Version="10.0.0" />
-    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.11" />
 
   </ItemGroup>
 
@@ -26,6 +16,8 @@
     <!-- The manifest and catalog model, so what the installer writes is exactly what hosts and
          Bitween read. -->
     <ProjectReference Include="..\SW.Serverless.Contract\SW.Serverless.Contract.csproj" />
+    <!-- Everything the commands do; this project is only the command line over it. -->
+    <ProjectReference Include="..\SW.Serverless.Tooling\SW.Serverless.Tooling.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -28,7 +28,7 @@ public sealed class ObjectStore : ICloudFilesService, IDisposable
     public string Register()
     {
         var name = "objectstore-" + Guid.NewGuid().ToString("N");
-        Shared.CloudFilesFactory.Register(name, _ => this);
+        SW.Serverless.Tooling.CloudFilesFactory.Register(name, _ => this);
         return name;
     }
 

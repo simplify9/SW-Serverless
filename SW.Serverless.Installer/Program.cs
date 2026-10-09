@@ -1,7 +1,7 @@
 using CommandLine;
 using SW.PrimitiveTypes;
 using SW.Serverless.Contract.Catalog;
-using SW.Serverless.Installer.Shared;
+using SW.Serverless.Tooling;
 using System;
 using System.Collections.Generic;
 using System.IO;

@@ -8,7 +8,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Threading.Tasks;
 
-namespace SW.Serverless.Installer.Shared
+namespace SW.Serverless.Tooling
 {
     /// <summary>What goes into storage for one package, beside the zip itself.</summary>
     public class PackageInfo

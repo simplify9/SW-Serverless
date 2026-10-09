@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SW.PrimitiveTypes;
 using SW.Serverless.Contract.Catalog;
-using SW.Serverless.Installer.Shared;
+using SW.Serverless.Tooling;
 
 namespace SW.Serverless.Installer.UnitTests;
 
