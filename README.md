@@ -48,7 +48,7 @@ published to PyPI and npm later.
 
 Self-contained binaries are published on the
 [GitHub releases](https://github.com/simplify9/SW-Serverless/releases) tagged `cli-v<version>`, one
-per platform: `sw-serverless-<rid>.tar.gz` for `linux-x64`, `linux-arm64`, `linux-musl-x64`,
+per platform: `sw-serverless-<rid>.tar.gz` for `linux-x64`, `linux-arm64`, `linux-musl-x64`, `linux-musl-arm64`,
 `osx-x64` and `osx-arm64`, and `sw-serverless-win-x64.zip`, with a `SHA256SUMS` file. On Linux or
 macOS, the install script picks your platform, checks the download and installs to `~/.local/bin`:
 

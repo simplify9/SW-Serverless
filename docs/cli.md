@@ -22,6 +22,7 @@ Self-contained binaries are published on the
 | Linux x64 | `sw-serverless-linux-x64.tar.gz` |
 | Linux Arm64 | `sw-serverless-linux-arm64.tar.gz` |
 | Linux x64, musl (Alpine) | `sw-serverless-linux-musl-x64.tar.gz` |
+| Linux Arm64, musl (Alpine) | `sw-serverless-linux-musl-arm64.tar.gz` |
 | macOS Intel | `sw-serverless-osx-x64.tar.gz` |
 | macOS Apple silicon | `sw-serverless-osx-arm64.tar.gz` |
 | Windows x64 | `sw-serverless-win-x64.zip` |
