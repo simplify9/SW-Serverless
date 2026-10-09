@@ -9,6 +9,8 @@ class Resident:
         sw.expect("Name", "resident")
 
     async def start(self):
+        # Asking the host from start: answered only because start runs beside the read loop.
+        await sw.context().set_state("started", "yes")
         self.started = True
 
     async def stop(self):
@@ -21,8 +23,8 @@ class Resident:
         self.resets.append(session_id)
 
     @sw.command("Started")
-    def is_started(self) -> bool:
-        return self.started
+    async def is_started(self) -> bool:
+        return self.started and await sw.context().get_state("started") == "yes"
 
     @sw.command("Publish")
     async def publish(self, text: str) -> str:

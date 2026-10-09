@@ -26,7 +26,7 @@ namespace SW.Serverless.Sdk.Resident
 
     /// <summary>
     /// Optional. Implement on a POOLED adapter to clear per-session state between checkouts —
-    /// without this, process-static state leaks across requests (design doc, section 14.5).
+    /// without this, process-static state leaks across requests.
     /// </summary>
     public interface IResettable
     {

@@ -4,8 +4,7 @@ namespace SW.Serverless.Sdk.Resident
 {
     /// <summary>
     /// Written by the host as a single JSON line on the child's stdin, immediately after spawn.
-    /// It travels here rather than on argv so that nothing secret is visible in `ps aux` —
-    /// see the design doc, section 14.3.
+    /// It travels here rather than on argv so that nothing secret is visible in `ps aux`.
     /// </summary>
     public class Handshake
     {

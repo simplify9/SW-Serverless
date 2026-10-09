@@ -4,7 +4,7 @@ namespace SW.Serverless.Sdk
 {
     /// <summary>
     /// A contract this adapter implements, and its version — e.g. "orders" 1. Reported
-    /// in the adapter's description and handshake, and checked by <c>serverless test</c>.
+    /// in the adapter's description and handshake, and checked by <c>sw-serverless test</c>.
     /// </summary>
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
     public class AdapterContractAttribute : Attribute

@@ -16,12 +16,16 @@ class Resident {
     sw.expect("Name", { default: "resident" });
   }
 
-  async start() { this.started = true; }
+  async start() {
+    // Asking the host from start: answered only because start runs beside the read loop.
+    await sw.context().setState("started", "yes");
+    this.started = true;
+  }
   async stop() { this.started = false; }
   status() { return { connected: this.started, state: "Listening", details: { resets: this.resets.length } }; }
   reset(sessionId) { this.resets.push(sessionId); }
 
-  isStarted() { return this.started; }
+  async isStarted() { return this.started && (await sw.context().getState("started")) === "yes"; }
   publish(text) {
     return sw.context().publish(text, { dedupeKey: "k-" + text, contentType: "text/plain", endpoint: "tests" });
   }

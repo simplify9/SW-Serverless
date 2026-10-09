@@ -141,6 +141,7 @@ class Runner:
         self._running = {}
         self._telemetry = None
         self._ready = None
+        self._starting = None
 
     # ------------------------------------------------------------------ description
 
@@ -249,10 +250,10 @@ class Runner:
             ready = frame["ready"]
             _adapter._startup_values.clear()
             _adapter._startup_values.update(ready.get("startup_values", {}))
-            start = getattr(self.adapter, "start", None)
-            if callable(start):
-                await _call(start)
-            self._ready.set()
+            # Started beside the read loop, not inside it: a start that publishes an event or reads its
+            # state waits for the host's answer, which only the read loop can take in. Commands wait
+            # for _ready; if start fails, the adapter stops.
+            self._starting = self.loop.create_task(self._start())
         elif "invoke" in frame:
             self._start_invoke(frame_id, frame["invoke"])
         elif "cancel" in frame:
@@ -276,6 +277,17 @@ class Runner:
                     if waiter and not waiter.done():
                         waiter.set_result(frame[answer])
         return False
+
+    async def _start(self):
+        start = getattr(self.adapter, "start", None)
+        try:
+            if callable(start):
+                await _call(start)
+            self._ready.set()
+        except Exception:
+            logging.getLogger("sw_serverless").exception("the adapter failed to start")
+            traceback.print_exc()
+            self.stopping.set()
 
     # ------------------------------------------------------------------ commands
 
@@ -339,6 +351,10 @@ class Runner:
         # Ask it to stop first, let commands already running answer, and only then go: a drain
         # promised those answers.
         deadline = time.monotonic() + (30 if shutdown.get("drain") else 5)
+        # A start still running finishes first: a stop that overtook it would leave half of what
+        # start set up in place.
+        if self._starting is not None and not self._starting.done():
+            await asyncio.wait({self._starting}, timeout=max(0.1, deadline - time.monotonic()))
         stop = getattr(self.adapter, "stop", None)
         if callable(stop):
             try:

@@ -405,8 +405,16 @@ class Runner {
     if (frame.ready) {
       startupValues.clear();
       for (const [k, v] of Object.entries(frame.ready.startup_values ?? {})) startupValues.set(k, v);
-      if (typeof this.adapter.start === "function") await this.adapter.start();
-      this.readyResolve();
+      // Started beside the read loop, not inside it: a start that publishes an event or reads its
+      // state waits for the host's answer, which only the read loop can take in. Commands wait for
+      // ready; if start fails, the adapter stops.
+      this.starting = Promise.resolve()
+        .then(() => (typeof this.adapter.start === "function" ? this.adapter.start() : undefined))
+        .then(() => this.readyResolve(), (e) => {
+          console.error(e?.stack ?? e);
+          process.exitCode = 1;
+          this.stopping.abort();
+        });
     } else if (frame.invoke) {
       this.startInvoke(id, frame.invoke);
     } else if (frame.cancel) {
@@ -503,6 +511,9 @@ class Runner {
     // promised those answers.
     const deadline = Date.now() + (shutdown.drain ? 30000 : 5000);
     const within = (promise) => Promise.race([promise, new Promise((r) => setTimeout(r, Math.max(100, deadline - Date.now())))]);
+    // A start still running finishes first: a stop that overtook it would leave half of what start
+    // set up in place.
+    if (this.starting) await within(this.starting.catch(() => {}));
     if (typeof this.adapter.stop === "function") {
       try { await within(Promise.resolve(this.adapter.stop())); } catch (e) { this.log(3, `stop() failed: ${e?.message ?? e}`); }
     }

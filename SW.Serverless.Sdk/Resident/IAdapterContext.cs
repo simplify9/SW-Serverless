@@ -9,7 +9,7 @@ namespace SW.Serverless.Sdk.Resident
     {
         public bool Accepted { get; set; }
 
-        /// <summary>The host's id for what it persisted, e.g. an Xchange id.</summary>
+        /// <summary>The host's id for what it persisted, e.g. a message id.</summary>
         public string Reference { get; set; }
 
         public string Error { get; set; }

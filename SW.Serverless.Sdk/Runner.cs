@@ -58,7 +58,7 @@ namespace SW.Serverless.Sdk
 
         /// <summary>
         /// Entry point for an adapter that STAYS RUNNING. Same zip, same spawn, same installation —
-        /// only this line differs from Run(). See the design doc, section 15.2.
+        /// only this line differs from Run().
         /// </summary>
         public static Task RunResident(object commandHandler) =>
             Resident.ResidentRunner.RunAsync(commandHandler);
