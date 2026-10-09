@@ -40,8 +40,11 @@ namespace SW.Serverless.Tooling.Scaffolding
         /// <summary>The SDK the templates reference; the first with --describe and the Bitween contract types.</summary>
         public const string SdkPackageVersion = "10.1.0";
 
-        /// <summary>The Bitween contract package the templates reference.</summary>
-        public const string BitweenAdaptersPackageVersion = "1.0.0";
+        /// <summary>
+        /// The Bitween contract package the templates reference: the first Bitween release that
+        /// publishes it. NuGet reads it as a minimum, so it resolves to the first one there is.
+        /// </summary>
+        public const string BitweenAdaptersPackageVersion = "10.0.59";
 
         public static readonly IReadOnlyList<string> Kinds = new[] { "handler", "mapper", "validator", "receiver" };
         public static readonly IReadOnlyList<string> Languages = new[] { "dotnet" };
