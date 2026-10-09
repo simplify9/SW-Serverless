@@ -1,21 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
-using SW.CloudFiles.Extensions;
-using SW.PrimitiveTypes;
 using SW.Serverless.Contract.Catalog;
-using SW.Serverless.Resident;
 using SW.Serverless.Runtimes;
 
 namespace SW.Serverless.Tooling.Conformance
@@ -27,7 +16,6 @@ namespace SW.Serverless.Tooling.Conformance
     /// </summary>
     public class ConformanceRunner
     {
-        const string Version = "0.0.0";
         const string UnknownCommand = "__ConformanceNoSuchCommand__";
 
         public async Task<ConformanceReport> RunAsync(ConformanceOptions options)
@@ -80,77 +68,49 @@ namespace SW.Serverless.Tooling.Conformance
             }
 
             // ------------------------------------------------------------ its own description
-            var runtimes = new AdapterRuntimes(options.Runtimes);
             options.Log("Asking the adapter to describe itself...");
-            var description = await DescribeAsync(runtimes, manifest, Path.Combine(options.PackageDirectory, entry), report);
+            var description = await DescribeAsync(options, manifest, Path.Combine(options.PackageDirectory, entry), report);
             if (description != null) CheckSettings(manifest, description, report);
 
             // ------------------------------------------------------------ running it
             options.Log("Starting it the way a host does...");
-            using var host = BuildHost(options, work);
-            await host.StartAsync();
+            LocalAdapterHost session;
             try
             {
-                var adapterId = string.IsNullOrWhiteSpace(manifest.Id) ? "conformance.adapter" : manifest.Id;
-                await UploadAsync(host.Services.GetRequiredService<ICloudFilesService>(), options.PackageDirectory,
-                    adapterId, entry);
+                session = await LocalAdapterHost.StartAsync(options.PackageDirectory, options.Settings, options.Runtimes,
+                    options.CommandTimeoutSeconds, work);
+                report.Pass("starts", manifest.IsResident ? "resident, attached over gRPC" : "classic session");
+            }
+            catch (Exception ex)
+            {
+                report.Fail("starts", ex.GetBaseException().Message);
+                return;
+            }
 
-                await using var session = await StartAsync(host.Services, manifest, $"{adapterId}/{Version}", options, report);
-                if (session == null) return;
-
+            await using (session)
+            {
                 foreach (var (contract, kinds) in ContractsToCheck(manifest, description, options, report))
                 foreach (var kind in kinds)
                     await CheckKindAsync(session, contract, kind, description, options, report);
 
                 await CheckUnknownCommandAsync(session, report);
             }
-            finally
-            {
-                await host.StopAsync();
-            }
         }
 
         // ---------------------------------------------------------------- describe
 
-        static async Task<AdapterSelfDescription> DescribeAsync(AdapterRuntimes runtimes, AdapterManifest manifest,
+        static async Task<AdapterSelfDescription> DescribeAsync(ConformanceOptions options, AdapterManifest manifest,
             string entryPath, ConformanceReport report)
         {
-            var runtime = runtimes.Find(manifest.Runtime);
-            if (runtime == null)
-            {
-                report.Fail("describe", $"no launcher for the '{manifest.Runtime}' runtime");
-                return null;
-            }
-
-            var startInfo = runtime.StartInfo(entryPath, new RuntimeLaunch { Arguments = new[] { AdapterSelfDescription.Flag } });
-            try
-            {
-                using var process = Process.Start(startInfo)!;
-                process.StandardInput.Close();
-                var output = process.StandardOutput.ReadToEndAsync();
-                var errors = process.StandardError.ReadToEndAsync();
-                if (!process.WaitForExit(30_000))
-                {
-                    try { process.Kill(true); } catch { }
-                    report.Fail("describe", $"it didn't answer {AdapterSelfDescription.Flag} within 30 seconds — an SDK older than 10.1.0 doesn't know it");
-                    return null;
-                }
-
-                var description = AdapterSelfDescription.Parse(await output);
-                if (process.ExitCode != 0)
-                    report.Fail("describe", $"{AdapterSelfDescription.Flag} exited with {process.ExitCode}: {await errors}");
-                else if (string.IsNullOrWhiteSpace(description.SdkLanguage))
-                    report.Fail("describe", "the description doesn't name its SDK's language");
-                else
-                    report.Pass("describe", $"{description.SdkLanguage} SDK {description.SdkVersion}, {description.Commands.Count} commands" +
-                                            (description.Warnings.Count > 0 ? $"; warnings: {string.Join("; ", description.Warnings)}" : ""));
-                return description;
-            }
-            catch (Exception ex)
-            {
-                report.Fail("describe", $"its description couldn't be read: {ex.Message}");
-                return null;
-            }
+            var (description, problem) = await LocalAdapterHost.DescribeAsync(entryPath, manifest.Runtime, options.Runtimes);
+            if (description == null)
+                report.Fail("describe", problem);
+            else if (string.IsNullOrWhiteSpace(description.SdkLanguage))
+                report.Fail("describe", "the description doesn't name its SDK's language");
+            else
+                report.Pass("describe", $"{description.SdkLanguage} SDK {description.SdkVersion}, {description.Commands.Count} commands" +
+                                        (description.Warnings.Count > 0 ? $"; warnings: {string.Join("; ", description.Warnings)}" : ""));
+            return description;
         }
 
         /// <summary>The manifest's properties must be the settings the adapter itself declares.</summary>
@@ -174,136 +134,6 @@ namespace SW.Serverless.Tooling.Conformance
 
             if (differences.Count > 0) report.Fail("settings match the manifest", string.Join("; ", differences) + " — serverless build rewrites the manifest from the adapter");
             else report.Pass("settings match the manifest", $"{declared.Count} settings");
-        }
-
-        // ---------------------------------------------------------------- the host
-
-        static IHost BuildHost(ConformanceOptions options, string work)
-        {
-            var tag = Guid.NewGuid().ToString("N")[..10];
-            return Host.CreateDefaultBuilder()
-                .ConfigureLogging(l => l.ClearProviders())
-                .ConfigureAppConfiguration(c => c.Sources.Clear())
-                .ConfigureServices(s =>
-                {
-                    s.AddLocalTestsCloudFiles(o =>
-                    {
-                        o.BucketName = "conformance-" + tag;
-                        o.StoragePath = Path.Combine(work, "store");
-                    });
-                    s.AddAdapterRuntimes(o =>
-                    {
-                        o.PythonExecutable = options.Runtimes.PythonExecutable;
-                        o.NodeExecutable = options.Runtimes.NodeExecutable;
-                        o.DotnetExecutable = options.Runtimes.DotnetExecutable;
-                    });
-                    s.AddServerless(o =>
-                    {
-                        o.AdapterRemotePath = "adapters";
-                        o.AdapterLocalPath = Path.Combine(work, "installed");
-                        o.AdapterMetadataCacheDuration = 1;
-                        o.CommandTimeout = options.CommandTimeoutSeconds;
-                    });
-                    s.AddResidentAdapters<NoEvents>(o =>
-                    {
-                        o.SocketPath = Path.Combine("/tmp", $"swsl-conf-{tag}.sock");
-                        o.PipeName = $"swsl-conf-{tag}";
-                        o.HandshakeTimeout = TimeSpan.FromSeconds(60);
-                    });
-                })
-                .Build();
-        }
-
-        static async Task UploadAsync(ICloudFilesService files, string directory, string adapterId, string entry)
-        {
-            using var buffer = new MemoryStream();
-            using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
-                foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
-                    archive.CreateEntryFromFile(file, Path.GetRelativePath(directory, file).Replace('\\', '/'), CompressionLevel.Fastest);
-
-            buffer.Position = 0;
-            var hash = Convert.ToHexString(await SHA256.HashDataAsync(buffer))[..16].ToLowerInvariant();
-            buffer.Position = 0;
-            await files.WriteAsync(buffer, new WriteFileSettings
-            {
-                Key = AdapterCatalogPaths.Version("adapters", adapterId, Version),
-                ContentType = "application/zip",
-                Metadata = new Dictionary<string, string> { ["EntryAssembly"] = entry, ["Hash"] = "conformance-" + hash },
-            });
-        }
-
-        // ---------------------------------------------------------------- sessions
-
-        /// <summary>A running adapter, called by command name with raw payloads.</summary>
-        interface ISession : IAsyncDisposable
-        {
-            Task<string> CallAsync(string command, object input);
-            Task CallVoidAsync(string command, object input);
-        }
-
-        static async Task<ISession> StartAsync(IServiceProvider services, AdapterManifest manifest, string adapterRef,
-            ConformanceOptions options, ConformanceReport report)
-        {
-            try
-            {
-                ISession session = manifest.IsResident
-                    ? await ResidentSession.StartAsync(services, adapterRef, options)
-                    : await ClassicSession.StartAsync(services, adapterRef, options);
-                report.Pass("starts", manifest.IsResident ? "resident, attached over gRPC" : "classic session");
-                return session;
-            }
-            catch (Exception ex)
-            {
-                report.Fail("starts", ex.GetBaseException().Message);
-                return null;
-            }
-        }
-
-        sealed class ClassicSession(IServiceScope scope, IServerlessService service, int timeout) : ISession
-        {
-            public static async Task<ISession> StartAsync(IServiceProvider services, string adapterRef, ConformanceOptions options)
-            {
-                var scope = services.CreateScope();
-                var service = scope.ServiceProvider.GetRequiredService<IServerlessService>();
-                await service.StartAsync(adapterRef, "conformance", new Dictionary<string, string>(options.Settings));
-                return new ClassicSession(scope, service, options.CommandTimeoutSeconds);
-            }
-
-            public Task<string> CallAsync(string command, object input) => service.InvokeAsync<string>(command, input, timeout);
-            public Task CallVoidAsync(string command, object input) => service.InvokeAsync(command, input, timeout);
-
-            public ValueTask DisposeAsync()
-            {
-                (service as IDisposable)?.Dispose();
-                scope.Dispose();
-                return ValueTask.CompletedTask;
-            }
-        }
-
-        sealed class ResidentSession(IResidentAdapterHost host, ResidentAdapterInstance instance, string adapterRef, int timeout) : ISession
-        {
-            public static async Task<ISession> StartAsync(IServiceProvider services, string adapterRef, ConformanceOptions options)
-            {
-                var host = services.GetRequiredService<IResidentAdapterHost>();
-                var instance = await host.StartExclusiveAsync(new AdapterSpec
-                {
-                    AdapterId = adapterRef,
-                    InstanceKey = "conformance",
-                    StartupValues = new Dictionary<string, string>(options.Settings),
-                });
-                return new ResidentSession(host, instance, adapterRef, options.CommandTimeoutSeconds);
-            }
-
-            public Task<string> CallAsync(string command, object input) => instance.InvokeAsync<string>(command, input, timeoutSeconds: timeout);
-            public Task CallVoidAsync(string command, object input) => instance.InvokeAsync<object>(command, input, timeoutSeconds: timeout);
-
-            public async ValueTask DisposeAsync() => await host.StopAsync(adapterRef, "conformance", drain: false);
-        }
-
-        sealed class NoEvents : IAdapterEventSink
-        {
-            public Task<EventOutcome> OnEventAsync(InboundEvent inboundEvent, CancellationToken cancellationToken) =>
-                Task.FromResult(EventOutcome.Ok("conformance"));
         }
 
         // ---------------------------------------------------------------- contracts
@@ -336,7 +166,7 @@ namespace SW.Serverless.Tooling.Conformance
             }
         }
 
-        static async Task CheckKindAsync(ISession session, ContractDocument contract, string kind,
+        static async Task CheckKindAsync(LocalAdapterHost session, ContractDocument contract, string kind,
             AdapterSelfDescription description, ConformanceOptions options, ConformanceReport report)
         {
             var prefix = $"{contract.Name} {kind}";
@@ -391,7 +221,7 @@ namespace SW.Serverless.Tooling.Conformance
         /// without input as they come, a text input fed the first id the session listed, and a
         /// destructive method only when allowed.
         /// </summary>
-        static async Task CheckSessionAsync(ISession session, ContractDocument contract, string prefix,
+        static async Task CheckSessionAsync(LocalAdapterHost session, ContractDocument contract, string prefix,
             IReadOnlyList<ContractMethod> methods, ConformanceOptions options, ConformanceReport report)
         {
             string firstId = null;
@@ -457,7 +287,7 @@ namespace SW.Serverless.Tooling.Conformance
         }
 
         /// <summary>An unknown command is refused with an error, and the adapter keeps answering.</summary>
-        static async Task CheckUnknownCommandAsync(ISession session, ConformanceReport report)
+        static async Task CheckUnknownCommandAsync(LocalAdapterHost session, ConformanceReport report)
         {
             for (var attempt = 1; attempt <= 2; attempt++)
             {
