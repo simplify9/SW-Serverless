@@ -8,8 +8,8 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
-        <PackageReference Include="MSTest.TestAdapter" Version="3.7.1" />
-        <PackageReference Include="MSTest.TestFramework" Version="3.7.1" />
+        <PackageReference Include="MSTest.TestAdapter" Version="3.7.3" />
+        <PackageReference Include="MSTest.TestFramework" Version="3.7.3" />
         <PackageReference Include="coverlet.collector" Version="6.0.4">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -18,8 +18,8 @@
              (Colima, Rancher), so the broker tests skipped on machines that had Docker. -->
         <PackageReference Include="Testcontainers.RabbitMq" Version="4.15.0" />
         <PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
-        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests" Version="10.0.0" />
-        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="10.0.0" />
+        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests" Version="10.0.1" />
+        <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="10.0.1" />
 
     </ItemGroup>
 
