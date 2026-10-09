@@ -41,7 +41,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="serverless" />
+    <InternalsVisibleTo Include="sw-serverless" />
     <InternalsVisibleTo Include="SW.Serverless.Installer.UnitTests" />
     <InternalsVisibleTo Include="SW.Serverless.CompatibilityTests" />
   </ItemGroup>

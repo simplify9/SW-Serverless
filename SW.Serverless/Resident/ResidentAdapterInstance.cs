@@ -19,7 +19,7 @@ namespace SW.Serverless.Resident
 
     /// <summary>
     /// One live adapter process, as the host sees it. Callers hold a HANDLE, never ownership —
-    /// a DI scope ending must not kill a broker connection (design doc 4).
+    /// a DI scope ending must not kill a broker connection.
     /// </summary>
     public sealed class ResidentAdapterInstance : IAsyncDisposable
     {
@@ -30,7 +30,7 @@ namespace SW.Serverless.Resident
         readonly IAdapterStateStore stateStore;
 
         // The correlation fix: every outstanding call is keyed, so a late reply can never
-        // resolve an unrelated one the way the single v1 field did (design doc 14.3).
+        // resolve an unrelated one the way the single v1 field did.
         readonly ConcurrentDictionary<long, PendingCall> pending = new();
 
         readonly Channel<HostFrame> outbound = Channel.CreateUnbounded<HostFrame>(
@@ -420,7 +420,7 @@ namespace SW.Serverless.Resident
                 : options.InvokeTimeout;
 
             // On timeout the call is REMOVED, so a late reply is discarded rather than
-            // resolving the next caller's completion — the v1 defect (design doc 14.3).
+            // resolving the next caller's completion — the v1 defect.
             call.Timer = new Timer(_ =>
             {
                 if (pending.TryRemove(id, out var c))

@@ -40,7 +40,7 @@ namespace SW.Serverless
         /// <summary>
         /// Adds the resident adapter runtime: a Kestrel endpoint on a Unix domain socket or named
         /// pipe that adapters dial, plus the supervisor that owns their processes.
-        /// Classic per-invocation adapters are untouched by this — see the design doc, section 15.
+        /// Classic per-invocation adapters are untouched by this.
         /// </summary>
         public static IServiceCollection AddResidentAdapters<TSink>(this IServiceCollection services,
             Action<ResidentOptions> configure = null)

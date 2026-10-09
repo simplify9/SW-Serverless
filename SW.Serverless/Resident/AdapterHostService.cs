@@ -8,7 +8,7 @@ namespace SW.Serverless.Resident
 {
     /// <summary>
     /// The gRPC endpoint the adapter dials. It listens only on a Unix domain socket or a named
-    /// pipe — no port, no bind address, no firewall rule (design doc 15.1).
+    /// pipe — no port, no bind address, no firewall rule.
     /// </summary>
     internal class AdapterHostService : Contract.AdapterHost.AdapterHostBase
     {

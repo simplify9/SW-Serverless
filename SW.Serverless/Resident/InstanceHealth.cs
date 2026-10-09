@@ -7,7 +7,6 @@ namespace SW.Serverless.Resident
     /// One instance as the node-health view sees it. Two independent sources deliberately:
     /// HOST-OBSERVED figures (memory, CPU, restarts) need no adapter cooperation, so they still
     /// work when the adapter is wedged; ADAPTER-REPORTED ones carry provider detail.
-    /// Design doc, section 6.3.
     /// </summary>
     public class InstanceHealth
     {

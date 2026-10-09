@@ -7,10 +7,10 @@ using System.Linq;
 namespace SW.Serverless.Samples.Carrier
 {
     /// <summary>
-    /// The audit trail of every upstream call, which is what Traxis's GetLogs returns and what
+    /// The audit trail of every upstream call, which is what GetLogs returns and what
     /// ends up in the S3 record for a shipment.
     ///
-    /// In Traxis this is a process-STATIC list, and that is safe there only because a classic
+    /// Kept as a process-STATIC list, and that is safe there only because a classic
     /// adapter serves exactly one caller before exiting. Pool the process and one request's
     /// carrier calls leak into the next request's audit log.
     ///

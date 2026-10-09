@@ -149,6 +149,8 @@ namespace SW.Serverless.Contract.Catalog
         public string EntryFor(string platform) =>
             platform != null && Entries != null && Entries.TryGetValue(platform, out var entry) ? entry : Entry;
 
+        /// <summary>Whether <see cref="Lifecycle"/> is resident. Worked out, so never written.</summary>
+        [JsonIgnore]
         public bool IsResident =>
             string.Equals(Lifecycle, ResidentLifecycle, StringComparison.OrdinalIgnoreCase);
 

@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace SW.Serverless.Samples.Carrier
 {
     // The HOST's contract, not the carrier's. In a real deployment these types live in the host's
-    // own SDK — SimplyWorks.TraxisGateway.Sdk — and the adapter's whole job is translating between
+    // own SDK, and the adapter's whole job is translating between
     // them and whatever the upstream happens to speak. SW.Serverless never sees either.
 
     public class ShipmentRequest

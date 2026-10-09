@@ -43,7 +43,7 @@ namespace SW.Serverless.Installer
         [Option("no-source", HelpText = "Leave the source out of the package.")]
         public bool NoSource { get; set; }
 
-        [Option("allow", HelpText = "A source file whose secret-scan finding is a false positive. Repeat for more.")]
+        [Option("allow", HelpText = "Source files whose secret-scan findings are false positives, separated by spaces.")]
         public IEnumerable<string> Allow { get; set; }
 
         [Option("dry-run", HelpText = "Show the source that would be carried, and build nothing.")]
@@ -63,7 +63,7 @@ namespace SW.Serverless.Installer
         [Option("allow-delete", HelpText = "Let a receiver's DeleteFile run: it removes or moves a real file at the source.")]
         public bool AllowDelete { get; set; }
 
-        [Option("contract", HelpText = "A contract file to check against, beyond those the CLI carries. Repeat for more.")]
+        [Option("contract", HelpText = "Contract files to check against, separated by spaces.")]
         public IEnumerable<string> Contracts { get; set; }
 
         [Option("timeout", Default = 60, HelpText = "Seconds one call may take.")]
@@ -173,6 +173,17 @@ namespace SW.Serverless.Installer
 
         public static async Task<int> Test(TestCliOptions opts)
         {
+            List<ContractDocument> contracts;
+            try
+            {
+                contracts = (opts.Contracts ?? Enumerable.Empty<string>()).Select(ContractDocument.FromFile).ToList();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Newtonsoft.Json.JsonException)
+            {
+                Console.WriteLine($"The contract couldn't be read: {ex.Message}");
+                return Failure;
+            }
+
             var (package, cleanup) = await PackageFolderAsync(opts.Package);
             if (package == null) return Failure;
             try
@@ -182,7 +193,7 @@ namespace SW.Serverless.Installer
                     PackageDirectory = package,
                     Settings = ReadSettings(opts.Settings),
                     AllowDelete = opts.AllowDelete,
-                    Contracts = (opts.Contracts ?? Enumerable.Empty<string>()).Select(ContractDocument.FromFile).ToList(),
+                    Contracts = contracts,
                     CommandTimeoutSeconds = opts.Timeout,
                     Log = Console.WriteLine,
                 });

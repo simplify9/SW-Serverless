@@ -18,7 +18,7 @@ namespace SW.Serverless.Samples.FolderSource
     ///
     /// The ordering below is the part worth copying: the file is only archived AFTER the host
     /// acknowledges. Crash in between and the file is still there, so it is redelivered — which
-    /// is exactly why the dedupe key is mandatory (design doc, section 5).
+    /// is exactly why the dedupe key is mandatory.
     /// </summary>
     public class Handler : IResidentAdapter
     {
@@ -92,7 +92,7 @@ namespace SW.Serverless.Samples.FolderSource
             {
                 Connected = Directory.Exists(root),
                 // Idle and Disconnected are genuinely different things, and a plain liveness
-                // probe cannot tell them apart (design doc, section 6.4).
+                // probe cannot tell them apart.
                 State = !Directory.Exists(root) ? "Disconnected"
                       : pending == 0 && received == 0 ? "Idle"
                       : state,

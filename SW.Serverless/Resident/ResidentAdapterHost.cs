@@ -194,7 +194,7 @@ namespace SW.Serverless.Resident
             spec.AdapterValues = supervised.RequestedAdapterValues;
 
             // Resolves an explicit path, or installs from cloud storage — which is what makes
-            // "add a provider without redeploying" real (design doc 15.2).
+            // "add a provider without redeploying" real.
             var resolved = await locator.ResolveAsync(spec, cancellationToken);
             spec.EntryAssemblyPath = resolved.EntryAssemblyPath;
             spec.Executable = resolved.Executable ?? spec.Executable;
@@ -698,7 +698,7 @@ namespace SW.Serverless.Resident
             if (instance.State != InstanceState.Ready) return;
 
             // Host-observed metrics need no adapter cooperation, so they still work when the
-            // adapter is wedged (design doc 6.3).
+            // adapter is wedged.
             SampleProcess(supervised, instance);
 
             try

@@ -24,7 +24,7 @@ namespace SW.Serverless.Samples.Classic
         ///
         /// It is also precisely why a POOLED resident adapter cannot simply reuse this process:
         /// one caller's entries would leak into the next. Pooling needs IResettable and an
-        /// explicit session boundary. See the design doc, section 14.5.
+        /// explicit session boundary.
         /// </summary>
         static readonly List<string> CallLog = new();
 
@@ -137,7 +137,7 @@ namespace SW.Serverless.Samples.Classic
         /// <summary>
         /// Blocks, so a caller can hit CommandTimeout. Under the classic protocol a timeout does
         /// NOT kill this process, and the late reply is what the correlation fix on the host now
-        /// discards — see the design doc, section 14.3.
+        /// discards.
         /// </summary>
         public async Task<object> Slow(int seconds)
         {

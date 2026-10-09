@@ -129,6 +129,10 @@ public class CliCommandTests
         StringAssert.Contains(test.Output, "PASS orders processor: Process answers example 1");
         StringAssert.Contains(test.Output, "Conforms.");
 
+        var missing = await Cli("test", zip, "--settings", settings, "--contract", Path.Combine(Path.GetDirectoryName(project)!, "nowhere.json"));
+        Assert.AreEqual(Program.Failure, missing.Exit);
+        StringAssert.Contains(missing.Output, "The contract couldn't be read");
+
         var run = await Cli("run", zip, "--settings", settings, "--call", "Process", "--input", """{"OrderId":"SO-1"}""");
         Assert.AreEqual(Program.Success, run.Exit, run.Output);
         StringAssert.Contains(run.Output, "\"Accepted\":true");

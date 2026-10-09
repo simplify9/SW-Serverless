@@ -46,8 +46,6 @@ namespace SW.Serverless.Tooling.Building
         {
             ["linux-x64"] = new[] { "manylinux2014_x86_64", "manylinux_2_28_x86_64", "manylinux_2_17_x86_64" },
             ["linux-arm64"] = new[] { "manylinux2014_aarch64", "manylinux_2_28_aarch64", "manylinux_2_17_aarch64" },
-            ["linux-musl-x64"] = new[] { "musllinux_1_2_x86_64" },
-            ["linux-musl-arm64"] = new[] { "musllinux_1_2_aarch64" },
             ["osx-arm64"] = new[] { "macosx_11_0_arm64" },
             ["osx-x64"] = new[] { "macosx_10_9_x86_64" },
             ["win-x64"] = new[] { "win_amd64" },

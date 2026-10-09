@@ -105,10 +105,11 @@ namespace SW.Serverless.Tooling
         /// Version is empty for an unversioned upload.
         /// </remarks>
         public static Dictionary<string, string> LegacyMetadata(
-            string entryAssembly, string lifecycle, string kind, string sha256, string version) => new()
+            string entryAssembly, string lifecycle, string kind, string sha256, string version, string runtime = null) => new()
         {
             { "EntryAssembly", entryAssembly },
-            { "Lang", "dotnet" },
+            // The runtime it starts on; dotnet for every package before runtimes.
+            { "Lang", string.IsNullOrWhiteSpace(runtime) ? AdapterManifest.DotnetRuntime : runtime },
             { "Timestamp", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") },
             { "Lifecycle", string.IsNullOrWhiteSpace(lifecycle) ? AdapterDescription.ClassicLifecycle : lifecycle },
             { "Kind", kind ?? "" },
@@ -235,7 +236,7 @@ namespace SW.Serverless.Tooling
             // Loaded before uploading, so the new version is not mistaken for one the catalog missed.
             var entry = await LoadEntryAsync(adapterId);
             var sha256 = InstallerLogic.Sha256Of(zipPath);
-            var metadata = LegacyMetadata(package.EntryAssembly, package.Lifecycle, package.Kind, sha256, version);
+            var metadata = LegacyMetadata(package.EntryAssembly, package.Lifecycle, package.Kind, sha256, version, package.Manifest?.Runtime);
 
             await UploadAsync(versionKey, zipPath, metadata);
             // adapters/{id} is what hosts before manifests list and run, always with dotnet. An
@@ -278,7 +279,7 @@ namespace SW.Serverless.Tooling
             var sha256 = InstallerLogic.Sha256Of(zipPath);
 
             await UploadAsync(CurrentKeyOf(adapterId), zipPath,
-                LegacyMetadata(package.EntryAssembly, package.Lifecycle, package.Kind, sha256, null));
+                LegacyMetadata(package.EntryAssembly, package.Lifecycle, package.Kind, sha256, null, package.Manifest?.Runtime));
 
             MakeCurrent(entry, null, package.Manifest, sha256, package.IconDataUri);
             await catalog.SaveAsync(entry);
@@ -366,7 +367,7 @@ namespace SW.Serverless.Tooling
                 var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var item in versionMetadata.Where(m => !ProviderMetadata.Contains(m.Key)))
                     metadata[item.Key] = item.Value;
-                foreach (var item in LegacyMetadata(entryAssembly, lifecycle, kind, sha256, version))
+                foreach (var item in LegacyMetadata(entryAssembly, lifecycle, kind, sha256, version, manifest?.Runtime))
                     metadata[item.Key] = item.Value;
 
                 await UploadAsync(CurrentKeyOf(adapterId), zipPath, metadata);
