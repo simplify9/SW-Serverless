@@ -6,7 +6,7 @@ namespace SW.Serverless.Resident
     /// <summary>
     /// Turns an AdapterSpec into something launchable. The default resolves an explicit
     /// EntryAssemblyPath first, and otherwise installs from cloud storage — the same
-    /// download-and-extract step the classic path already uses (design doc 15.2).
+    /// download-and-extract step the classic path already uses.
     /// </summary>
     public interface IResidentAdapterLocator
     {
@@ -29,9 +29,12 @@ namespace SW.Serverless.Resident
 
     internal class DefaultResidentAdapterLocator : IResidentAdapterLocator
     {
-        readonly AdapterInstaller installer;
+        readonly System.IServiceProvider services;
 
-        public DefaultResidentAdapterLocator(AdapterInstaller installer) => this.installer = installer;
+        // The installer, and the storage and options it needs, only when an adapter is installed
+        // from storage: a host that gives every adapter by path registers neither AddServerless nor
+        // storage, and must still start.
+        public DefaultResidentAdapterLocator(System.IServiceProvider services) => this.services = services;
 
         public async Task<ResolvedAdapter> ResolveAsync(AdapterSpec spec, CancellationToken cancellationToken = default)
         {
@@ -44,6 +47,9 @@ namespace SW.Serverless.Resident
                     AdapterValues = spec.AdapterValues
                 };
 
+            var installer = services.GetService(typeof(AdapterInstaller)) as AdapterInstaller
+                            ?? throw new System.InvalidOperationException(
+                                $"Adapter '{spec.AdapterId}' has no EntryAssemblyPath, and installing it from storage needs AddServerless and a cloud files service.");
             var installed = await installer.InstallAsync(spec.AdapterId);
 
             // Cloud metadata is where Protocol / Lifecycle / Launcher / MaxInFlight live, so an
