@@ -716,4 +716,55 @@ public class CatalogPublishingTests
         Assert.AreEqual("actor", UploadOptionsResolver.ResolvePublishedBy(null, n => n == "GITHUB_ACTOR" ? "actor" : null));
         Assert.AreEqual(Environment.UserName, UploadOptionsResolver.ResolvePublishedBy(null, _ => null));
     }
+
+    /// <summary>
+    /// A deployment whose hosts read adapters from another folder: publishing, locating and promoting
+    /// all happen there, and nothing lands under the default one.
+    /// </summary>
+    [TestMethod]
+    public async Task A_repository_and_a_publish_work_under_the_folder_they_are_given()
+    {
+        var project = Path.Combine(root, "pyproject");
+        Directory.CreateDirectory(project);
+        File.WriteAllText(Path.Combine(project, "adapter.json"), """{ "id": "acme.py", "version": "1.0.0", "runtime": "python", "entry": "main.py" }""");
+        File.WriteAllText(Path.Combine(project, "main.py"), """
+            import simplyworks_serverless as sw
+
+            class Echo:
+                @sw.command("Echo")
+                def echo(self, text: str) -> str:
+                    return text
+
+            sw.run(Echo)
+            """);
+        var built = await Tooling.Building.PackageBuilder.BuildAsync(new Tooling.Building.BuildRequest
+        {
+            ProjectDirectory = project,
+            OutputDirectory = Path.Combine(root, "pybuilt"),
+        });
+        Assert.IsTrue(built.Succeeded, string.Join("; ", built.Problems));
+
+        var published = await PackagePublisher.PublishPackageAsync(store, new PublishPackageRequest
+        {
+            PackagePath = built.ZipPath,
+            Promote = false,
+            RemotePath = "custom",
+        }, output.Add);
+        Assert.AreEqual("1.0.0", published.Version);
+
+        var keys = await Keys();
+        CollectionAssert.Contains(keys, "custom-versions/acme.py/1.0.0");
+        CollectionAssert.Contains(keys, "custom-catalog/acme.py.json");
+        Assert.IsFalse(keys.Any(k => k.StartsWith("adapters")), string.Join(", ", keys));
+
+        var repository = new AdapterRepository(store, output.Add, "custom");
+        Assert.AreEqual("custom", repository.RemotePath);
+        Assert.IsNull((await repository.LoadEntryAsync("acme.py")).Current, "published without being made current");
+        CollectionAssert.AreEqual(new[] { "1.0.0" }, (await repository.LocateVersionsAsync("acme.py")).Keys.ToArray());
+
+        await repository.PromoteAsync("acme.py", "1.0.0", Path.Combine(root, "promote"));
+        Assert.AreEqual("1.0.0", (await repository.LoadEntryAsync("acme.py")).Current);
+        // A Python adapter is never put where hosts before manifests would run it with dotnet.
+        Assert.IsFalse((await Keys()).Contains("custom/acme.py"));
+    }
 }

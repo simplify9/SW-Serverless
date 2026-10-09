@@ -43,6 +43,9 @@ namespace SW.Serverless.Tooling
         public bool Promote { get; set; } = true;
         public string ReleaseNotes { get; set; }
         public string PublishedBy { get; set; }
+
+        /// <summary>The adapters' folder in storage, as hosts are configured with it; "adapters" unless set.</summary>
+        public string RemotePath { get; set; } = AdapterRepository.Root;
     }
 
     public class PublishResult
@@ -190,7 +193,7 @@ namespace SW.Serverless.Tooling
                 if (string.IsNullOrWhiteSpace(mode))
                     throw new SWException("The package has no version: give one with -v, or set version in adapter.json.");
 
-                var repository = new AdapterRepository(files, log);
+                var repository = new AdapterRepository(files, log, request.RemotePath);
                 var version = await repository.ResolveVersionAsync(adapterId, mode);
                 manifest.Version = version;
                 manifest.PublishedOn = DateTimeOffset.UtcNow;
