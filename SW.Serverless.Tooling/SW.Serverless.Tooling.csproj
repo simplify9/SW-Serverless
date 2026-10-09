@@ -39,6 +39,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- What serverless build vendors into every Python package: the SDK, from this repository, and
+         the Bitween kinds, copied from Bitween-api's sdk/python like the contract above. Embedded, so
+         a build needs neither PyPI nor a network. Named by their path in the package. -->
+    <EmbeddedResource Include="../sdk/python/src/simplyworks_serverless/*.py" LogicalName="python/simplyworks_serverless/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Contracts/bitween/python/**/*.py" LogicalName="python/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="serverless" />
     <InternalsVisibleTo Include="SW.Serverless.Installer.UnitTests" />
     <InternalsVisibleTo Include="SW.Serverless.CompatibilityTests" />

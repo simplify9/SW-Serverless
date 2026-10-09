@@ -21,7 +21,7 @@ namespace SW.Serverless.Installer
         [Value(0, Required = true, MetaName = "name", HelpText = "The adapter's name, e.g. AcmeOrders: its folder, project and class.")]
         public string Name { get; set; }
 
-        [Option("lang", Default = "dotnet", HelpText = "Its language: dotnet. Python, Node and Go arrive with their SDKs.")]
+        [Option("lang", Default = "dotnet", HelpText = "Its language: dotnet or python. Node and Go arrive with their SDKs.")]
         public string Language { get; set; }
 
         [Option("kind", Default = "handler", HelpText = "handler, mapper, validator or receiver.")]
@@ -285,7 +285,7 @@ namespace SW.Serverless.Installer
                 return (folder, () => TryDelete(folder));
             }
 
-            if (Directory.Exists(path) && Directory.GetFiles(path, "*.*proj").Length > 0)
+            if (Directory.Exists(path) && (Directory.GetFiles(path, "*.*proj").Length > 0 || IsUnbuiltPython(path)))
             {
                 var output = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "swsl-cli", Guid.NewGuid().ToString("N"));
                 var built = await PackageBuilder.BuildAsync(new BuildRequest { ProjectDirectory = path, OutputDirectory = output, Log = Console.WriteLine });
@@ -298,6 +298,22 @@ namespace SW.Serverless.Installer
 
             Console.WriteLine($"{given} is neither a package zip, a package folder nor a project folder");
             return (null, () => { });
+        }
+
+        /// <summary>A Python project rather than a built package: its manifest names Python, and no build has written the entry.</summary>
+        static bool IsUnbuiltPython(string folder)
+        {
+            var manifestPath = System.IO.Path.Combine(folder, AdapterManifest.FileName);
+            if (!File.Exists(manifestPath) || File.Exists(System.IO.Path.Combine(folder, PythonBuild.EntryScript))) return false;
+            try
+            {
+                return string.Equals(AdapterManifest.Parse(File.ReadAllText(manifestPath)).Runtime, AdapterManifest.PythonRuntime,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
         }
 
         static IDictionary<string, string> ReadSettings(string path)

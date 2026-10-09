@@ -79,9 +79,14 @@ namespace SW.Serverless.Tooling.Building
             }
 
             var runtime = string.IsNullOrWhiteSpace(author.Runtime) ? AdapterManifest.DotnetRuntime : author.Runtime;
+            if (string.Equals(runtime, AdapterManifest.PythonRuntime, StringComparison.OrdinalIgnoreCase))
+            {
+                await PythonBuild.BuildAsync(request, project, author, result);
+                return result;
+            }
             if (!string.Equals(runtime, AdapterManifest.DotnetRuntime, StringComparison.OrdinalIgnoreCase))
             {
-                result.Problems.Add($"building a '{runtime}' adapter arrives with that language's SDK; this build does .NET");
+                result.Problems.Add($"building a '{runtime}' adapter arrives with that language's SDK; this build does .NET and Python");
                 return result;
             }
 
@@ -137,7 +142,7 @@ namespace SW.Serverless.Tooling.Building
                 manifest.Source = new AdapterSource
                 {
                     BuildCommand = "dotnet publish -c Release",
-                    Lockfiles = source.Keys.Where(k => Lockfiles.Contains(Path.GetFileName(k), StringComparer.OrdinalIgnoreCase)).OrderBy(k => k).ToList(),
+                    Lockfiles = source.Keys.Where(IsLockfile).OrderBy(k => k).ToList(),
                 };
                 foreach (var (relative, absolute) in source.OrderBy(s => s.Key, StringComparer.Ordinal))
                 {
@@ -216,6 +221,9 @@ namespace SW.Serverless.Tooling.Building
             return manifest;
         }
 
+        internal static bool IsLockfile(string path) =>
+            Lockfiles.Contains(Path.GetFileName(path), StringComparer.OrdinalIgnoreCase);
+
         /// <summary>
         /// Whether the author's own adapter.json says "lifecycle": "classic" — read from the file,
         /// since the model fills in classic when nothing is said.
@@ -235,11 +243,13 @@ namespace SW.Serverless.Tooling.Building
         /// The source to carry, keyed by its path in the package's source folder: the project and
         /// the local projects it references, under the ignore rules, scanned for secrets.
         /// </summary>
-        static Dictionary<string, string> CollectSource(string project, string projectFile, BuildRequest request, BuildResult result)
+        internal static Dictionary<string, string> CollectSource(string project, string projectFile, BuildRequest request, BuildResult result)
         {
             var roots = new List<string> { project };
-            foreach (var referenced in LocalReferences(projectFile, new HashSet<string>(StringComparer.Ordinal)))
-                if (!roots.Contains(referenced)) roots.Add(referenced);
+            // A .NET project's local project references come along; other languages have none to follow.
+            if (projectFile != null)
+                foreach (var referenced in LocalReferences(projectFile, new HashSet<string>(StringComparer.Ordinal)))
+                    if (!roots.Contains(referenced)) roots.Add(referenced);
 
             var common = CommonAncestor(roots);
             var repository = RepositoryRoot(project);

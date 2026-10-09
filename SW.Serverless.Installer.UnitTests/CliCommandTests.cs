@@ -67,9 +67,9 @@ public class CliCommandTests
         StringAssert.Contains(File.ReadAllText(Path.Combine(project, "Program.cs")), "IBitweenValidator");
 
         Assert.AreEqual(Program.Failure, (await Cli("init", "AcmeOrders", "--dir", work)).Exit, "an existing project isn't overwritten");
-        var (pythonExit, pythonOutput) = await Cli("init", "PyOrders", "--lang", "python", "--dir", work);
-        Assert.AreEqual(Program.Failure, pythonExit);
-        StringAssert.Contains(pythonOutput, "arrives with that language's SDK");
+        var (nodeExit, nodeOutput) = await Cli("init", "NodeOrders", "--lang", "node", "--dir", work);
+        Assert.AreEqual(Program.Failure, nodeExit);
+        StringAssert.Contains(nodeOutput, "arrives with that language's SDK");
     }
 
     [TestMethod]
@@ -185,5 +185,61 @@ public class CliCommandTests
         File.WriteAllText(settings, """{ "ApiKey": "k" }""");
         var test = await Cli("test", Path.Combine(project, "bin", "serverless", "package"), "--settings", settings);
         Assert.AreEqual(Program.Success, test.Exit, test.Output);
+    }
+
+    /// <summary>
+    /// A Python adapter, from init to a package that conforms: built with the SDK and the Bitween
+    /// kinds vendored from the copies the CLI carries, so no PyPI and no network are needed.
+    /// </summary>
+    [DataTestMethod]
+    [DataRow("handler")]
+    [DataRow("mapper")]
+    [DataRow("receiver")]
+    [DataRow("validator")]
+    public async Task What_init_writes_in_python_builds_and_conforms(string kind)
+    {
+        var work = WorkFolder();
+        var name = "Py" + char.ToUpper(kind[0]) + kind[1..];
+        Assert.AreEqual(Program.Success, (await Cli("init", name, "--lang", "python", "--kind", kind, "--dir", work)).Exit);
+        var project = Path.Combine(work, name);
+        Assert.IsTrue(File.Exists(Path.Combine(project, "main.py")));
+
+        var build = await Cli("build", project);
+        Assert.AreEqual(Program.Success, build.Exit, build.Output);
+
+        var package = Path.Combine(project, "bin", "serverless", "package");
+        var manifest = SW.Serverless.Contract.Catalog.AdapterManifest.Parse(File.ReadAllText(Path.Combine(package, "adapter.json")));
+        Assert.AreEqual("python", manifest.Runtime);
+        Assert.AreEqual(Tooling.Building.PythonBuild.EntryScript, manifest.Entry);
+        Assert.AreEqual("classic", manifest.Lifecycle);
+        Assert.AreEqual(2, manifest.Protocol.Min);
+        CollectionAssert.AreEqual(new[] { kind }, manifest.Kinds);
+        Assert.AreEqual(1, manifest.Contracts["bitween"]);
+        Assert.IsNull(manifest.Platforms, "nothing native: it runs anywhere");
+        Assert.IsTrue(File.Exists(Path.Combine(package, "_vendor", "simplyworks_serverless", "__init__.py")));
+        Assert.IsTrue(File.Exists(Path.Combine(package, "_vendor", "simplyworks_bitween", "__init__.py")));
+        Assert.IsTrue(manifest.Source.Files.ContainsKey("main.py"));
+        Assert.IsTrue(File.Exists(Path.Combine(package, "source", "main.py")));
+
+        var settings = Path.Combine(work, "settings.json");
+        File.WriteAllText(settings, """{ "ApiKey": "k" }""");
+        // The project folder: built first, then checked.
+        var test = await Cli("test", project, "--settings", settings);
+        Assert.AreEqual(Program.Success, test.Exit, test.Output);
+    }
+
+    /// <summary>
+    /// The CLI vendors its own copy of the Bitween kinds for Python, as it carries its own copy of
+    /// the contract; it must be the one Bitween-api maintains.
+    /// </summary>
+    [TestMethod]
+    public void The_python_bitween_kinds_the_cli_carries_are_bitween_s()
+    {
+        var root = RepositoryRoot();
+        var original = Path.GetFullPath(Path.Combine(root, "..", "Bitween-api", "sdk", "python", "src", "simplyworks_bitween", "__init__.py"));
+        if (!File.Exists(original)) Assert.Inconclusive($"Bitween-api isn't beside this repository ({original})");
+        var copy = Path.Combine(root, "SW.Serverless.Tooling", "Contracts", "bitween", "python", "simplyworks_bitween", "__init__.py");
+        Assert.AreEqual(File.ReadAllText(original), File.ReadAllText(copy),
+            "copy Bitween-api/sdk/python/src/simplyworks_bitween into SW.Serverless.Tooling/Contracts/bitween/python");
     }
 }

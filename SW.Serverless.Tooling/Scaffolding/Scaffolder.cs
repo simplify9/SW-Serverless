@@ -47,7 +47,10 @@ namespace SW.Serverless.Tooling.Scaffolding
         public const string BitweenAdaptersPackageVersion = "10.0.59";
 
         public static readonly IReadOnlyList<string> Kinds = new[] { "handler", "mapper", "validator", "receiver" };
-        public static readonly IReadOnlyList<string> Languages = new[] { "dotnet" };
+        public static readonly IReadOnlyList<string> Languages = new[] { "dotnet", "python" };
+
+        /// <summary>The Python SDK the templates name; serverless build vendors the copy it carries.</summary>
+        public const string PythonSdkVersion = "10.1.0";
 
         public static ScaffoldResult Scaffold(ScaffoldRequest request)
         {
@@ -71,10 +74,13 @@ namespace SW.Serverless.Tooling.Scaffolding
 
             Directory.CreateDirectory(directory);
             result.ProjectDirectory = directory;
-            foreach (var (file, content) in DotnetFiles(name, id, request.Kind))
+            var files = request.Language == "python" ? PythonFiles(name, id, request.Kind) : DotnetFiles(name, id, request.Kind);
+            foreach (var (file, content) in files)
             {
                 var path = Path.Combine(directory, file);
-                File.WriteAllText(path, content.Replace("\r\n", "\n"));
+                // Ending in a newline, as text files should: a line appended later stays its own line.
+                var text = content.Replace("\r\n", "\n");
+                File.WriteAllText(path, text.EndsWith('\n') ? text : text + "\n");
                 result.Files.Add(file);
             }
             return result;
@@ -246,6 +252,149 @@ namespace SW.Serverless.Tooling.Scaffolding
                     static Task Main() => Runner.Run(new {{(handlerOrMapper == "mapper" ? "Mapper" : "Handler")}}());
                 }
                 """,
+        };
+
+        static IEnumerable<(string File, string Content)> PythonFiles(string name, string id, string kind)
+        {
+            yield return ("adapter.json", $$"""
+                {
+                  "id": "{{id}}",
+                  "version": "0.1.0",
+                  "displayName": "{{Spaced(name)}}",
+                  "summary": "What this {{kind}} does, in one sentence, for the adapter list.",
+                  "runtime": "python",
+                  "entry": "main.py"
+                }
+                """);
+
+            yield return ("main.py", PythonMain(name, kind));
+
+            yield return ("requirements.txt", $$"""
+                # What the adapter imports, pinned, one per line; serverless build vendors them into the
+                # package. The two SDKs are vendored by serverless build itself: they're listed here for
+                # your editor and for running the tests outside a build.
+                simplyworks-serverless=={{PythonSdkVersion}}
+                simplyworks-bitween>={{BitweenAdaptersPackageVersion}}
+                """);
+
+            yield return ("settings.example.json", """
+                {
+                  "BaseUrl": "https://partner.example.test",
+                  "ApiKey": "put a test key here, and keep this file out of version control once it holds one"
+                }
+                """);
+
+            yield return (".gitignore", """
+                __pycache__/
+                .venv/
+                bin/
+                settings.json
+                """);
+
+            yield return ("README.md", $$"""
+                # {{Spaced(name)}}
+
+                A Bitween {{kind}} adapter in Python (3.12 or later).
+
+                ```sh
+                serverless build                                   # builds bin/serverless/{{id}}-0.1.0.zip
+                cp settings.example.json settings.json             # then fill in real values
+                serverless test --settings settings.json           # checks it against the Bitween contract
+                serverless publish bin/serverless/{{id}}-0.1.0.zip  # with your storage flags
+                ```
+
+                Settings are declared in code with `sw.expect`; `serverless build` writes them into the
+                manifest Bitween reads. Dependencies go in `requirements.txt`, pinned.
+                """);
+        }
+
+        static string PythonMain(string name, string kind) => kind switch
+        {
+            "receiver" => $$""""
+                import simplyworks_serverless as sw
+                from simplyworks_bitween import ExchangeFile, Receiver
+
+
+                class {{name}}(Receiver):
+                    """Fetches files on a schedule. Bitween calls initialize, list_files, then get_file and
+                    delete_file for each file, then finalize."""
+
+                    def __init__(self):
+                        # Declare settings here; read them in the methods with sw.value_of.
+                        sw.expect("BaseUrl", "https://partner.example.test", description="Where files are fetched from.")
+                        sw.expect("ApiKey", secret=True, description="The partner's key.")
+
+                    def list_files(self) -> list[str]:
+                        return ["example-1"]
+
+                    def get_file(self, file_id: str) -> ExchangeFile:
+                        return ExchangeFile(data='{"id": "%s"}' % file_id, filename=file_id + ".json")
+
+                    def delete_file(self, file_id: str) -> None:
+                        pass
+
+
+                if __name__ == "__main__":
+                    sw.run({{name}})
+                """",
+            "validator" => $$""""
+                import simplyworks_serverless as sw
+                from simplyworks_bitween import ExchangeFile, ValidationResult, Validator
+
+
+                class {{name}}(Validator):
+                    """Checks a message before Bitween accepts it."""
+
+                    def __init__(self):
+                        sw.expect("MaxBytes", "1000000", type="number", description="The largest message accepted.")
+
+                    def validate(self, file: ExchangeFile) -> ValidationResult:
+                        result = ValidationResult()
+                        if len(file.data) > int(sw.value_of("MaxBytes")):
+                            result.add("Data", "The message is larger than allowed.")
+                        return result
+
+
+                if __name__ == "__main__":
+                    sw.run({{name}})
+                """",
+            "mapper" => $$""""
+                import simplyworks_serverless as sw
+                from simplyworks_bitween import ExchangeFile, Mapper
+
+
+                class {{name}}(Mapper):
+                    """Maps a message into the shape the next step expects."""
+
+                    def map(self, file: ExchangeFile) -> ExchangeFile:
+                        # Return the message in its new shape.
+                        return ExchangeFile(data=file.data, filename=file.filename)
+
+
+                if __name__ == "__main__":
+                    sw.run({{name}})
+                """",
+            _ => $$""""
+                import simplyworks_serverless as sw
+                from simplyworks_bitween import ExchangeFile, Handler
+
+
+                class {{name}}(Handler):
+                    """Delivers a message and returns the partner's response."""
+
+                    def __init__(self):
+                        # Declare settings here; read them in the methods with sw.value_of.
+                        sw.expect("BaseUrl", "https://partner.example.test", description="Where messages go.")
+                        sw.expect("ApiKey", secret=True, description="The partner's key.")
+
+                    def handle(self, file: ExchangeFile) -> ExchangeFile:
+                        # Send file.data to the partner. A rejection is returned with bad_data=True, not raised.
+                        return ExchangeFile(data=file.data, filename=file.filename)
+
+
+                if __name__ == "__main__":
+                    sw.run({{name}})
+                """",
         };
 
         static string Spaced(string name) => Regex.Replace(name, "(?<=[a-z0-9])(?=[A-Z])", " ");
