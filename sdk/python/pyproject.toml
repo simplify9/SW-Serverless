@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simplyworks-serverless"
+version = "10.1.0"
+description = "Write SW-Serverless adapters in Python: settings, commands, and the host protocol, with no dependencies."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Simplify9" }]
+classifiers = ["Programming Language :: Python :: 3", "Operating System :: POSIX"]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/simplify9/SW-Serverless"
+
+[tool.setuptools.packages.find]
+where = ["src"]
