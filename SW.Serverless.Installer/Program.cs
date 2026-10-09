@@ -16,7 +16,12 @@ namespace SW.Serverless.Installer
         public const int Failure = 1;
 
         /// <summary>The commands besides publishing. Matched on the first argument only.</summary>
-        static readonly HashSet<string> Commands = new(StringComparer.Ordinal) { "promote", "versions", "withdraw" };
+        static readonly HashSet<string> Commands = new(StringComparer.Ordinal)
+        {
+            "promote", "versions", "withdraw",
+            // For adapters in any language, over SW.Serverless.Tooling.
+            "init", "build", "test", "run", "manifest", "publish",
+        };
 
         private static Task<int> Main(string[] args) => RunAsync(args);
 
@@ -47,6 +52,13 @@ namespace SW.Serverless.Installer
                         o => Promote(o, environment)),
                     "versions" => await Run(parser.ParseArguments<VersionsCliOptions>(rest),
                         o => Versions(o, environment)),
+                    "init" => await Run(parser.ParseArguments<InitCliOptions>(rest), AdapterCommands.Init),
+                    "build" => await Run(parser.ParseArguments<BuildCliOptions>(rest), AdapterCommands.Build),
+                    "test" => await Run(parser.ParseArguments<TestCliOptions>(rest), AdapterCommands.Test),
+                    "run" => await Run(parser.ParseArguments<RunCliOptions>(rest), AdapterCommands.Run),
+                    "manifest" => await Run(parser.ParseArguments<ManifestCliOptions>(rest), AdapterCommands.Manifest),
+                    "publish" => await Run(parser.ParseArguments<PublishPackageCliOptions>(rest),
+                        o => AdapterCommands.Publish(o, environment)),
                     _ => await Run(parser.ParseArguments<WithdrawCliOptions>(rest),
                         o => Withdraw(o, environment)),
                 };
@@ -211,6 +223,33 @@ namespace SW.Serverless.Installer
             }
             catch (SWException ex)
             {
+                Console.WriteLine(ex.Message);
+                return Failure;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
+                return Failure;
+            }
+        }
+
+        /// <summary>Runs <paramref name="action"/> against the storage the options name, reporting a failure as a message.</summary>
+        internal static async Task<int> WithStorage(StorageCliOptions opts, Func<string, string> environment,
+            Func<SW.PrimitiveTypes.ICloudFilesService, Task> action)
+        {
+            try
+            {
+                await action(CloudFilesFactory.Create(await GetServerlessUploadOptions(opts, environment)));
+                return Success;
+            }
+            catch (SWException ex)
+            {
+                Console.WriteLine(ex.Message);
+                return Failure;
+            }
+            catch (ArgumentException ex)
+            {
+                // Semver's verdicts: an existing or lower version, or an unknown bump.
                 Console.WriteLine(ex.Message);
                 return Failure;
             }

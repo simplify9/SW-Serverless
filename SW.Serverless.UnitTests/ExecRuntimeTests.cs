@@ -47,7 +47,12 @@ namespace SW.Serverless.UnitTests
                        // Built under the test's own folder, never beside the sample's usual build output,
                        // which other tests read.
                        $"--artifacts-path \"{Path.Combine(workDirectory, "artifacts")}\" -v q")
-                   { RedirectStandardOutput = true, RedirectStandardError = true }))
+                   {
+                       RedirectStandardOutput = true,
+                       RedirectStandardError = true,
+                       // No MSBuild nodes left holding the output open: see DotnetBuilds.
+                       Environment = { ["MSBUILDDISABLENODEREUSE"] = "1", ["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0" },
+                   }))
             {
                 var output = await publish!.StandardOutput.ReadToEndAsync() + await publish.StandardError.ReadToEndAsync();
                 await publish.WaitForExitAsync();
