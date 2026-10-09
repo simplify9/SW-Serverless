@@ -1,0 +1,71 @@
+name: sw-serverless CLI release
+
+# A tag cli-v<version> (cli-v10.2.0) publishes the sw-serverless command as self-contained
+# binaries on a GitHub release: nothing needs .NET installed to run them.
+on:
+  push:
+    tags: ["cli-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 10.2.0 (tagged cli-v<version>)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rid: [linux-x64, linux-arm64, linux-musl-x64, osx-x64, osx-arm64, win-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Version
+        id: version
+        run: |
+          v="${{ github.event.inputs.version }}"
+          [ -z "$v" ] && v="${GITHUB_REF_NAME#cli-v}"
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+      - name: Publish
+        run: >
+          dotnet publish SW.Serverless.Installer -c Release -r ${{ matrix.rid }} --self-contained
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none
+          -p:Version=${{ steps.version.outputs.value }} -o out
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp README.md LICENSE out/ 2>/dev/null || true
+          if [[ "${{ matrix.rid }}" == win-* ]]; then
+            (cd out && zip -q -r ../dist/sw-serverless-${{ matrix.rid }}.zip .)
+          else
+            tar -czf dist/sw-serverless-${{ matrix.rid }}.tar.gz -C out .
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sw-serverless-${{ matrix.rid }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${{ github.event.inputs.version }}"
+          [ -z "$v" ] && v="${GITHUB_REF_NAME#cli-v}"
+          gh release create "cli-v$v" dist/* --title "sw-serverless $v" --target "${{ github.sha }}" \
+            --notes "The sw-serverless command, self-contained for each platform. Install: curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install-cli.sh | sh — or download the archive for your platform and check it against SHA256SUMS."
