@@ -6,11 +6,6 @@ using SW.CloudFiles.OC;
 
 namespace SW.Serverless.Installer
 {
-    public class FileData
-    {
-        public ServerlessUploadOptions CloudFiles { get; set; }
-    }
-
     /// <summary>
     /// Where the adapters live. Shared by publishing and by the promote, versions and withdraw
     /// commands, so every command finds the store the same way: flags, then -c, then SWSL_*.
@@ -36,6 +31,12 @@ namespace SW.Serverless.Installer
 
         [Option('c', "cloudfilesconfigpath", HelpText = "Json cloud files config path. Oracle Cloud needs one; Google Cloud needs one or the SWSL_GC_* environment variables.")]
         public string CloudFilesConfigPath { get; set; }
+
+        public StorageFlags ToFlags() => new()
+        {
+            Provider = Provider, AccessKeyId = AccessKeyId, SecretAccessKey = SecretAccessKey,
+            BucketName = BucketName, ServiceUrl = ServiceUrl, CloudFilesConfigPath = CloudFilesConfigPath,
+        };
     }
 
     public class CliOptions : StorageCliOptions
