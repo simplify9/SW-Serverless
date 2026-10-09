@@ -145,10 +145,17 @@ namespace SW.Serverless
                            FileAccess.Read, FileShare.Read))
                 using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read))
                 {
+                    var sourcePrefix = SourcePrefixOf(archive);
                     long total = 0;
                     foreach (var entry in archive.Entries)
                     {
                         if (string.IsNullOrEmpty(entry.Name)) continue;
+
+                        // The source a package carries is for reading and rebuilding, never for
+                        // running: left in storage rather than unpacked onto every host.
+                        if (sourcePrefix != null &&
+                            entry.FullName.Replace("\\", "/").StartsWith(sourcePrefix, StringComparison.Ordinal))
+                            continue;
 
                         // An entry's name is the package author's to choose, and "../../app/x.dll"
                         // would otherwise be written over the host's own files before any adapter
@@ -187,6 +194,30 @@ namespace SW.Serverless
             finally
             {
                 try { File.Delete(tempZipPath); } catch { /* best-effort cleanup */ }
+            }
+        }
+
+        /// <summary>
+        /// The folder a package's manifest says holds its source, as a "folder/" prefix, or null
+        /// when the manifest declares none. Only a declared source folder is skipped: a package
+        /// from before manifests had source may well have a folder called "source" it needs to run.
+        /// </summary>
+        static string SourcePrefixOf(ZipArchive archive)
+        {
+            var manifestEntry = archive.GetEntry(AdapterManifest.FileName);
+            if (manifestEntry == null) return null;
+            try
+            {
+                using var reader = new StreamReader(manifestEntry.Open());
+                var source = AdapterManifest.Parse(reader.ReadToEnd()).Source;
+                if (source == null || !AdapterManifest.IsPackagePath(source.Path ?? "")) return null;
+                return source.Path.Replace("\\", "/").TrimEnd('/') + "/";
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // A manifest that can't be read is reported, with its reason, once the package is
+                // unpacked; here it only means there's no source folder to leave out.
+                return null;
             }
         }
 
@@ -264,13 +295,27 @@ namespace SW.Serverless
         {
             var root = options.AdapterRemotePath;
             var (adapterId, version) = AdapterCatalogPaths.Split(adapterRef);
-            if (version == null) return AdapterCatalogPaths.Current(root, adapterRef);
+            if (version == null)
+            {
+                var current = AdapterCatalogPaths.Current(root, adapterRef);
+                if (await ExistsAsync(current)) return current;
+
+                // An adapter in a runtime older hosts can't run has no adapters/{id} — it is kept
+                // out of their sight on purpose — so its current version is the catalog's.
+                var entry = await new AdapterCatalogStore(cloudFilesService, root).GetAsync(adapterRef);
+                if (entry?.Current is { } currentVersion)
+                    return AdapterCatalogPaths.Version(root, adapterRef, currentVersion);
+                return current;
+            }
 
             var key = AdapterCatalogPaths.Version(root, adapterId, version);
-            if ((await cloudFilesService.ListAsync(key)).Any(f => string.Equals(f.Key, key, StringComparison.Ordinal)))
+            if (await ExistsAsync(key))
                 return key;
             return AdapterCatalogPaths.LegacyVersion(root, adapterId, version);
         }
+
+        async Task<bool> ExistsAsync(string key) =>
+            (await cloudFilesService.ListAsync(key)).Any(f => string.Equals(f.Key, key, StringComparison.Ordinal));
 
         public async Task<InstalledAdapter> GetMetadataAsync(string adapterId)
         {
