@@ -118,6 +118,36 @@ message Hello {
     // adapters and hosts built before this field existed; a host that understands this one gets
     // the shape as well as the name.
     repeated CommandInfo commands = 7;
+
+    // Fields 8–11 describe the adapter without .NET in the picture, for SDKs in any language. All
+    // optional: a host reads them when present and an adapter built before them leaves them out.
+
+    // The SDK's language — dotnet, python, node, go — beside sdk_version.
+    string sdk_language = 8;
+
+    // The settings the adapter reads, the language-neutral form of Runner.Expect: what a host or a
+    // UI needs to ask for before running it.
+    repeated SettingInfo settings = 9;
+
+    // The kinds of adapter it implements for a contract, as that contract names them — for
+    // Bitween: handler, mapper, validator, receiver.
+    repeated string kinds = 10;
+
+    // The contracts it implements and their versions, e.g. bitween -> 1.
+    map<string, int32> contracts = 11;
+}
+
+// One setting an adapter reads.
+message SettingInfo {
+    string name = 1;
+    string description = 2;
+    bool required = 3;
+    // Secret settings are masked wherever they're shown and never logged.
+    bool secret = 4;
+    // Empty when the setting has no default.
+    string default_value = 5;
+    // text, multiline, number, boolean, select or json, as adapter manifests type properties.
+    string type = 6;
 }
 
 // One callable command on an adapter.
@@ -140,6 +170,11 @@ message CommandInfo {
     // From [AdapterCommand(Description = "…")] on the method. Optional, and worth setting: the
     // difference between a list of names and a list an operator can act on.
     string description = 5;
+
+    // JSON Schemas of the argument and the result, for SDKs in any language: parameter_type and
+    // parameter_schema above are .NET's view and stay as they are. Empty when not given.
+    string input_schema = 6;
+    string output_schema = 7;
 }
 
 message InvokeResult {

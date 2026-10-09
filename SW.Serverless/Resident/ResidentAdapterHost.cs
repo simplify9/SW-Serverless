@@ -609,6 +609,10 @@ namespace SW.Serverless.Resident
                 Commands = instance.Commands,
                 CommandDetails = instance.CommandDetails,
                 SdkVersion = instance.SdkVersion,
+                SdkLanguage = instance.SdkLanguage,
+                Settings = instance.Settings,
+                Kinds = instance.Kinds,
+                Contracts = instance.Contracts,
                 ProtocolVersion = instance.ProtocolVersion,
                 // Names only. These are connection strings and passwords, and health is what gets
                 // shown on screens and serialised into logs.

@@ -84,6 +84,13 @@ namespace SW.Serverless.UnitTests
             adapters.Describe().Single(h => h.InstanceKey == "discovery").CommandDetails;
 
         [TestMethod]
+        public void The_adapter_says_which_language_its_SDK_is()
+        {
+            var described = adapters.Describe().Single(h => h.InstanceKey == "discovery");
+            Assert.AreEqual("dotnet", described.SdkLanguage);
+        }
+
+        [TestMethod]
         public void Every_public_command_is_discovered_without_being_declared_anywhere()
         {
             var names = Commands().Select(c => c.Name).ToList();

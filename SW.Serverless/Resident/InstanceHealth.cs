@@ -55,6 +55,10 @@ namespace SW.Serverless.Resident
         public IReadOnlyCollection<AdapterCommand> CommandDetails { get; set; }
             = Array.Empty<AdapterCommand>();
         public string SdkVersion { get; set; }
+        public string SdkLanguage { get; set; }
+        public IReadOnlyCollection<AdapterSetting> Settings { get; set; }
+        public IReadOnlyCollection<string> Kinds { get; set; }
+        public IReadOnlyDictionary<string, int> Contracts { get; set; }
         public int ProtocolVersion { get; set; }
         public IReadOnlyDictionary<string, string> StartupValues { get; set; }
 

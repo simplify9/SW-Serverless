@@ -161,6 +161,7 @@ namespace SW.Serverless.Sdk.Resident
                     InstanceKey = handshake.InstanceKey ?? "",
                     ProtocolVersion = protocol,
                     SdkVersion = typeof(ResidentRunner).Assembly.GetName().Version?.ToString() ?? "0.0.0",
+                    SdkLanguage = "dotnet",
                     Capabilities = { Capabilities() },
                     Commands = { CommandInfos() }
                 }
