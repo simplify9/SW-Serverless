@@ -17,12 +17,14 @@ jobs:
       security-events: read   # critical-vuln gate job
     uses: simplify9/.github/.github/workflows/reusable-nuget-publish.yml@0f33f79176152bc11acf0ff08ed970ae8b429b3d # main
     with:
-      # Contract FIRST: both of the others depend on it, and publishing them without it
-      # produces packages whose dependency cannot resolve — which is what 8.1.13 shipped as.
+      # Contract FIRST: the others depend on it, and publishing them without it produces
+      # packages whose dependency cannot resolve — which is what 8.1.13 shipped as. Tooling
+      # last: it depends on the host and the contract.
       nuget-projects: >-
         SW.Serverless.Contract/SW.Serverless.Contract.csproj
         SW.Serverless/SW.Serverless.csproj
         SW.Serverless.Sdk/SW.Serverless.Sdk.csproj
+        SW.Serverless.Tooling/SW.Serverless.Tooling.csproj
       major-version: '10'
       minor-version: '1'
       dotnet-version: '10.0.x'
