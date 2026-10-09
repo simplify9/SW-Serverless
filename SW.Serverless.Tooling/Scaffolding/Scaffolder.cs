@@ -47,10 +47,13 @@ namespace SW.Serverless.Tooling.Scaffolding
         public const string BitweenAdaptersPackageVersion = "10.0.59";
 
         public static readonly IReadOnlyList<string> Kinds = new[] { "handler", "mapper", "validator", "receiver" };
-        public static readonly IReadOnlyList<string> Languages = new[] { "dotnet", "python" };
+        public static readonly IReadOnlyList<string> Languages = new[] { "dotnet", "python", "node", "typescript" };
 
         /// <summary>The Python SDK the templates name; serverless build vendors the copy it carries.</summary>
         public const string PythonSdkVersion = "10.1.0";
+
+        /// <summary>The Node SDK the templates name; serverless build vendors the copy it carries.</summary>
+        public const string NodeSdkVersion = "10.1.0";
 
         public static ScaffoldResult Scaffold(ScaffoldRequest request)
         {
@@ -74,7 +77,13 @@ namespace SW.Serverless.Tooling.Scaffolding
 
             Directory.CreateDirectory(directory);
             result.ProjectDirectory = directory;
-            var files = request.Language == "python" ? PythonFiles(name, id, request.Kind) : DotnetFiles(name, id, request.Kind);
+            var files = request.Language switch
+            {
+                "python" => PythonFiles(name, id, request.Kind),
+                "node" => NodeFiles(name, id, request.Kind, typeScript: false),
+                "typescript" => NodeFiles(name, id, request.Kind, typeScript: true),
+                _ => DotnetFiles(name, id, request.Kind),
+            };
             foreach (var (file, content) in files)
             {
                 var path = Path.Combine(directory, file);
@@ -396,6 +405,167 @@ namespace SW.Serverless.Tooling.Scaffolding
                     sw.run({{name}})
                 """",
         };
+
+        static IEnumerable<(string File, string Content)> NodeFiles(string name, string id, string kind, bool typeScript)
+        {
+            var entry = typeScript ? "main.ts" : "main.js";
+            yield return ("adapter.json", $$"""
+                {
+                  "id": "{{id}}",
+                  "version": "0.1.0",
+                  "displayName": "{{Spaced(name)}}",
+                  "summary": "What this {{kind}} does, in one sentence, for the adapter list.",
+                  "runtime": "node",
+                  "entry": "{{entry}}"
+                }
+                """);
+
+            yield return (entry, NodeMain(name, kind, typeScript));
+
+            // The SDKs are named for the editor and for running outside a build; serverless build
+            // vendors the copies it carries. Other dependencies go here too, and are installed into
+            // the package.
+            var package = new System.Text.Json.Nodes.JsonObject { ["name"] = id, ["private"] = true };
+            if (typeScript) package["type"] = "module";
+            package["engines"] = new System.Text.Json.Nodes.JsonObject { ["node"] = ">=22" };
+            package["dependencies"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["@simplyworks/serverless"] = NodeSdkVersion,
+                ["@simplyworks/bitween"] = ">=" + BitweenAdaptersPackageVersion,
+            };
+            yield return ("package.json", package.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+
+            if (typeScript)
+                yield return ("tsconfig.json", """
+                    {
+                      // For your editor and tsc --noEmit. serverless build doesn't compile: Node strips the
+                      // types, so only syntax that strips cleanly is allowed (no enums or namespaces).
+                      "compilerOptions": {
+                        "target": "es2023",
+                        "module": "nodenext",
+                        "moduleResolution": "nodenext",
+                        "strict": true,
+                        "noEmit": true,
+                        "erasableSyntaxOnly": true,
+                        "verbatimModuleSyntax": true,
+                        "allowImportingTsExtensions": true
+                      }
+                    }
+                    """);
+
+            yield return ("settings.example.json", """
+                {
+                  "BaseUrl": "https://partner.example.test",
+                  "ApiKey": "put a test key here, and keep this file out of version control once it holds one"
+                }
+                """);
+
+            yield return (".gitignore", """
+                node_modules/
+                bin/
+                settings.json
+                """);
+
+            yield return ("README.md", $$"""
+                # {{Spaced(name)}}
+
+                A Bitween {{kind}} adapter in {{(typeScript ? "TypeScript" : "JavaScript")}}, for Node 22 or later.
+
+                ```sh
+                serverless build                                   # builds bin/serverless/{{id}}-0.1.0.zip
+                cp settings.example.json settings.json             # then fill in real values
+                serverless test --settings settings.json           # checks it against the Bitween contract
+                serverless publish bin/serverless/{{id}}-0.1.0.zip  # with your storage flags
+                ```
+
+                Settings are declared in code with `expect`; `serverless build` writes them into the
+                manifest Bitween reads.{{(typeScript ? " The build strips the types with Node itself, so no compiler is needed; `tsc --noEmit` checks them." : "")}}
+                """);
+        }
+
+        static string NodeMain(string name, string kind, bool ts)
+        {
+            var header = ts
+                ? $$"""
+                    import { expect, run, valueOf } from "@simplyworks/serverless";
+                    import { ExchangeFile, {{Pascal(kind)}}{{(kind == "validator" ? ", ValidationResult" : "")}} } from "@simplyworks/bitween";
+                    """
+                : $$"""
+                    const { expect, run, valueOf } = require("@simplyworks/serverless");
+                    const { ExchangeFile, {{Pascal(kind)}}{{(kind == "validator" ? ", ValidationResult" : "")}} } = require("@simplyworks/bitween");
+                    """;
+            string T(string type) => ts ? type : "";
+            var body = kind switch
+            {
+                "receiver" => $$"""
+                    /** Fetches files on a schedule. Bitween calls initialize, listFiles, then getFile and deleteFile for each file, then finalize. */
+                    class {{name}} extends Receiver {
+                      constructor() {
+                        super();
+                        // Declare settings here; read them in the methods with valueOf.
+                        expect("BaseUrl", { default: "https://partner.example.test", description: "Where files are fetched from." });
+                        expect("ApiKey", { secret: true, description: "The partner's key." });
+                      }
+
+                      listFiles(){{T(": string[]")}} {
+                        return ["example-1"];
+                      }
+
+                      getFile(fileId{{T(": string")}}){{T(": ExchangeFile")}} {
+                        return new ExchangeFile({ data: JSON.stringify({ id: fileId }), filename: `${fileId}.json` });
+                      }
+
+                      deleteFile(fileId{{T(": string")}}){{T(": void")}} {}
+                    }
+                    """,
+                "validator" => $$"""
+                    /** Checks a message before Bitween accepts it. */
+                    class {{name}} extends Validator {
+                      constructor() {
+                        super();
+                        expect("MaxBytes", { default: "1000000", type: "number", description: "The largest message accepted." });
+                      }
+
+                      validate(file{{T(": ExchangeFile")}}){{T(": ValidationResult")}} {
+                        const result = new ValidationResult();
+                        if (file.data.length > Number(valueOf("MaxBytes"))) result.add("Data", "The message is larger than allowed.");
+                        return result;
+                      }
+                    }
+                    """,
+                "mapper" => $$"""
+                    /** Maps a message into the shape the next step expects. */
+                    class {{name}} extends Mapper {
+                      map(file{{T(": ExchangeFile")}}){{T(": ExchangeFile")}} {
+                        // Return the message in its new shape.
+                        return new ExchangeFile({ data: file.data, filename: file.filename });
+                      }
+                    }
+                    """,
+                _ => $$"""
+                    /** Delivers a message and returns the partner's response. */
+                    class {{name}} extends Handler {
+                      constructor() {
+                        super();
+                        // Declare settings here; read them in the methods with valueOf.
+                        expect("BaseUrl", { default: "https://partner.example.test", description: "Where messages go." });
+                        expect("ApiKey", { secret: true, description: "The partner's key." });
+                      }
+
+                      handle(file{{T(": ExchangeFile")}}){{T(": ExchangeFile")}} {
+                        // Send file.data to valueOf("BaseUrl"). A rejection is returned with badData: true, not thrown.
+                        return new ExchangeFile({ data: file.data, filename: file.filename });
+                      }
+                    }
+                    """,
+            };
+            // valueOf is used by every template but the mapper; keep the import list honest there.
+            if (kind == "mapper") header = header.Replace("expect, run, valueOf", "run");
+            else if (kind == "receiver") header = header.Replace("expect, run, valueOf", "expect, run");
+            return header + "\n\n" + body + "\n\nrun(" + name + ");\n";
+        }
+
+        static string Pascal(string kind) => char.ToUpperInvariant(kind[0]) + kind[1..];
 
         static string Spaced(string name) => Regex.Replace(name, "(?<=[a-z0-9])(?=[A-Z])", " ");
     }

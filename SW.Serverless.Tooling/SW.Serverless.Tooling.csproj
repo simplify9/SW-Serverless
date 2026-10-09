@@ -35,7 +35,7 @@
     <!-- Contracts the kit knows by name. The Bitween one is copied from Bitween-api's
          SW.Bitween.Adapters/Contract; once SimplyWorks.Bitween.Adapters is published, reference it
          instead so the two can't drift. -->
-    <EmbeddedResource Include="Contracts/**/*.json" LogicalName="SW.Serverless.Tooling.Contracts.%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Contracts/*/*.json" LogicalName="SW.Serverless.Tooling.Contracts.%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
@@ -44,6 +44,10 @@
          a build needs neither PyPI nor a network. Named by their path in the package. -->
     <EmbeddedResource Include="../sdk/python/src/simplyworks_serverless/*.py" LogicalName="python/simplyworks_serverless/%(Filename)%(Extension)" />
     <EmbeddedResource Include="Contracts/bitween/python/**/*.py" LogicalName="python/%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- The same for Node: what serverless build puts in a Node package's node_modules. -->
+    <EmbeddedResource Include="../sdk/node/package.json" LogicalName="node/@simplyworks/serverless/package.json" />
+    <EmbeddedResource Include="../sdk/node/src/*.js;../sdk/node/src/*.d.ts" LogicalName="node/@simplyworks/serverless/src/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Contracts/bitween/node/**/*.js;Contracts/bitween/node/**/*.ts;Contracts/bitween/node/**/package.json" LogicalName="node/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

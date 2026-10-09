@@ -67,9 +67,9 @@ public class CliCommandTests
         StringAssert.Contains(File.ReadAllText(Path.Combine(project, "Program.cs")), "IBitweenValidator");
 
         Assert.AreEqual(Program.Failure, (await Cli("init", "AcmeOrders", "--dir", work)).Exit, "an existing project isn't overwritten");
-        var (nodeExit, nodeOutput) = await Cli("init", "NodeOrders", "--lang", "node", "--dir", work);
-        Assert.AreEqual(Program.Failure, nodeExit);
-        StringAssert.Contains(nodeOutput, "arrives with that language's SDK");
+        var (goExit, goOutput) = await Cli("init", "GoOrders", "--lang", "go", "--dir", work);
+        Assert.AreEqual(Program.Failure, goExit);
+        StringAssert.Contains(goOutput, "arrives with that language's SDK");
     }
 
     [TestMethod]
@@ -241,5 +241,70 @@ public class CliCommandTests
         var copy = Path.Combine(root, "SW.Serverless.Tooling", "Contracts", "bitween", "python", "simplyworks_bitween", "__init__.py");
         Assert.AreEqual(File.ReadAllText(original), File.ReadAllText(copy),
             "copy Bitween-api/sdk/python/src/simplyworks_bitween into SW.Serverless.Tooling/Contracts/bitween/python");
+    }
+
+    /// <summary>
+    /// A JavaScript or TypeScript adapter, from init to a package that conforms: TypeScript's types
+    /// stripped by Node itself, the SDKs vendored into node_modules from the copies the CLI carries.
+    /// </summary>
+    [DataTestMethod]
+    [DataRow("node", "handler")]
+    [DataRow("node", "receiver")]
+    [DataRow("typescript", "mapper")]
+    [DataRow("typescript", "validator")]
+    public async Task What_init_writes_in_node_builds_and_conforms(string language, string kind)
+    {
+        if (language == "typescript" && !NodeStripsTypes())
+            Assert.Inconclusive("this machine's node can't strip TypeScript types; it takes Node 22.13 or later");
+        var work = WorkFolder();
+        var name = (language == "node" ? "Js" : "Ts") + char.ToUpper(kind[0]) + kind[1..];
+        Assert.AreEqual(Program.Success, (await Cli("init", name, "--lang", language, "--kind", kind, "--dir", work)).Exit);
+        var project = Path.Combine(work, name);
+
+        var build = await Cli("build", project);
+        Assert.AreEqual(Program.Success, build.Exit, build.Output);
+
+        var package = Path.Combine(project, "bin", "serverless", "package");
+        var manifest = SW.Serverless.Contract.Catalog.AdapterManifest.Parse(File.ReadAllText(Path.Combine(package, "adapter.json")));
+        Assert.AreEqual("node", manifest.Runtime);
+        Assert.AreEqual("main.js", manifest.Entry);
+        Assert.AreEqual(language == "node" ? "javascript" : "typescript", manifest.Language);
+        CollectionAssert.AreEqual(new[] { kind }, manifest.Kinds);
+        Assert.IsTrue(File.Exists(Path.Combine(package, "node_modules", "@simplyworks", "serverless", "src", "index.js")));
+        Assert.IsTrue(File.Exists(Path.Combine(package, "node_modules", "@simplyworks", "bitween", "src", "index.js")));
+        Assert.IsTrue(manifest.Source.Files.ContainsKey(language == "node" ? "main.js" : "main.ts"));
+
+        var settings = Path.Combine(work, "settings.json");
+        File.WriteAllText(settings, """{ "ApiKey": "k" }""");
+        var test = await Cli("test", project, "--settings", settings);
+        Assert.AreEqual(Program.Success, test.Exit, test.Output);
+    }
+
+    static bool NodeStripsTypes()
+    {
+        try
+        {
+            using var node = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("node",
+                "-e \"process.exit(typeof require('node:module').stripTypeScriptTypes === 'function' ? 0 : 1)\"")
+                { RedirectStandardOutput = true, RedirectStandardError = true });
+            node!.WaitForExit();
+            return node.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    [TestMethod]
+    public void The_node_bitween_kinds_the_cli_carries_are_bitween_s()
+    {
+        var root = RepositoryRoot();
+        var original = Path.GetFullPath(Path.Combine(root, "..", "Bitween-api", "sdk", "node"));
+        if (!Directory.Exists(original)) Assert.Inconclusive($"Bitween-api isn't beside this repository ({original})");
+        var copy = Path.Combine(root, "SW.Serverless.Tooling", "Contracts", "bitween", "node", "@simplyworks", "bitween");
+        foreach (var file in new[] { "package.json", "src/index.js", "src/index.d.ts" })
+            Assert.AreEqual(File.ReadAllText(Path.Combine(original, file)), File.ReadAllText(Path.Combine(copy, file)),
+                $"copy Bitween-api/sdk/node/{file} into SW.Serverless.Tooling/Contracts/bitween/node/@simplyworks/bitween");
     }
 }

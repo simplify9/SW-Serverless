@@ -21,7 +21,7 @@ namespace SW.Serverless.Installer
         [Value(0, Required = true, MetaName = "name", HelpText = "The adapter's name, e.g. AcmeOrders: its folder, project and class.")]
         public string Name { get; set; }
 
-        [Option("lang", Default = "dotnet", HelpText = "Its language: dotnet or python. Node and Go arrive with their SDKs.")]
+        [Option("lang", Default = "dotnet", HelpText = "Its language: dotnet, python, node (JavaScript) or typescript. Go arrives with its SDK.")]
         public string Language { get; set; }
 
         [Option("kind", Default = "handler", HelpText = "handler, mapper, validator or receiver.")]
@@ -285,7 +285,7 @@ namespace SW.Serverless.Installer
                 return (folder, () => TryDelete(folder));
             }
 
-            if (Directory.Exists(path) && (Directory.GetFiles(path, "*.*proj").Length > 0 || IsUnbuiltPython(path)))
+            if (Directory.Exists(path) && (Directory.GetFiles(path, "*.*proj").Length > 0 || IsUnbuiltScript(path)))
             {
                 var output = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "swsl-cli", Guid.NewGuid().ToString("N"));
                 var built = await PackageBuilder.BuildAsync(new BuildRequest { ProjectDirectory = path, OutputDirectory = output, Log = Console.WriteLine });
@@ -300,15 +300,22 @@ namespace SW.Serverless.Installer
             return (null, () => { });
         }
 
-        /// <summary>A Python project rather than a built package: its manifest names Python, and no build has written the entry.</summary>
-        static bool IsUnbuiltPython(string folder)
+        /// <summary>
+        /// A Python or Node project rather than a built package: its manifest names the runtime, and
+        /// nothing a build writes is there — the Python entry, or the SDK in node_modules.
+        /// </summary>
+        static bool IsUnbuiltScript(string folder)
         {
             var manifestPath = System.IO.Path.Combine(folder, AdapterManifest.FileName);
-            if (!File.Exists(manifestPath) || File.Exists(System.IO.Path.Combine(folder, PythonBuild.EntryScript))) return false;
+            if (!File.Exists(manifestPath)) return false;
             try
             {
-                return string.Equals(AdapterManifest.Parse(File.ReadAllText(manifestPath)).Runtime, AdapterManifest.PythonRuntime,
-                    StringComparison.OrdinalIgnoreCase);
+                var runtime = AdapterManifest.Parse(File.ReadAllText(manifestPath)).Runtime;
+                if (string.Equals(runtime, AdapterManifest.PythonRuntime, StringComparison.OrdinalIgnoreCase))
+                    return !File.Exists(System.IO.Path.Combine(folder, PythonBuild.EntryScript));
+                if (string.Equals(runtime, AdapterManifest.NodeRuntime, StringComparison.OrdinalIgnoreCase))
+                    return !File.Exists(System.IO.Path.Combine(folder, "node_modules", "@simplyworks", "serverless", "package.json"));
+                return false;
             }
             catch (JsonException)
             {

@@ -84,9 +84,14 @@ namespace SW.Serverless.Tooling.Building
                 await PythonBuild.BuildAsync(request, project, author, result);
                 return result;
             }
+            if (string.Equals(runtime, AdapterManifest.NodeRuntime, StringComparison.OrdinalIgnoreCase))
+            {
+                await NodeBuild.BuildAsync(request, project, author, result);
+                return result;
+            }
             if (!string.Equals(runtime, AdapterManifest.DotnetRuntime, StringComparison.OrdinalIgnoreCase))
             {
-                result.Problems.Add($"building a '{runtime}' adapter arrives with that language's SDK; this build does .NET and Python");
+                result.Problems.Add($"building a '{runtime}' adapter arrives with that language's SDK; this build does .NET, Python and Node");
                 return result;
             }
 
