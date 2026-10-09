@@ -73,6 +73,17 @@ namespace SW.Serverless.Sdk
 
         async public static Task Run(object commandHandler)
         {
+            // --describe: say what this adapter is, without a host, and exit.
+            if (Describer.Requested(Environment.GetCommandLineArgs()))
+            {
+                await Describer.Print(Describer.Describe(
+                    commandHandler is Func<object> ? null : commandHandler.GetType(),
+                    () => commandHandler is Func<object> factory ? factory() : commandHandler,
+                    Contract.Catalog.AdapterManifest.ClassicLifecycle,
+                    CommandsOf));
+                return;
+            }
+
             Timer idleTimer = null;
 
             try
@@ -255,6 +266,15 @@ namespace SW.Serverless.Sdk
             if (nakedType != null)
                 type = nakedType;
             return type.IsPrimitive;
+        }
+
+        /// <summary>The classic commands of a built handler, for --describe.</summary>
+        static IEnumerable<(string, Type, Type, string)> CommandsOf(object built)
+        {
+            if (built == null) yield break;
+            foreach (var (name, info) in BuildMethodsDictionary(built))
+                yield return (name, info.ParameterType, info.Void ? null : Describer.ResultOf(info.MethodInfo),
+                    info.MethodInfo.GetCustomAttribute<AdapterCommandAttribute>()?.Description);
         }
 
         static Dictionary<string, HandlerMethodInfo> BuildMethodsDictionary(object commandHandler)

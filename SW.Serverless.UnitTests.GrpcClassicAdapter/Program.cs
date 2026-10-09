@@ -3,6 +3,8 @@ using SW.Serverless.Sdk;
 
 namespace SW.Serverless.UnitTests.GrpcClassicAdapter;
 
+[AdapterKind("handler")]
+[AdapterContract("bitween", 1)]
 public class Handler
 {
     public Handler()

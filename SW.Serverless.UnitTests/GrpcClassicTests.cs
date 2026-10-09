@@ -156,6 +156,27 @@ namespace SW.Serverless.UnitTests
         }
 
         [TestMethod]
+        public async Task Its_handshake_names_its_language_kinds_and_contracts()
+        {
+            var before = RunningKeys().ToHashSet();
+            var service = Service();
+            await service.StartAsync(AdapterId, "corr-7");
+            try
+            {
+                var described = host.Services.GetRequiredService<IResidentAdapterHost>().Describe()
+                    .Single(h => !before.Contains(h.InstanceKey));
+                Assert.AreEqual("dotnet", described.SdkLanguage);
+                CollectionAssert.AreEqual(new[] { "handler" }, described.Kinds.ToList());
+                Assert.AreEqual(1, described.Contracts["bitween"]);
+                Assert.AreEqual("10.1.0", described.SdkVersion);
+            }
+            finally
+            {
+                ((IDisposable)service).Dispose();
+            }
+        }
+
+        [TestMethod]
         public async Task An_adapter_error_fails_the_call_with_its_message()
         {
             var service = Service();
