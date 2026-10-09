@@ -8,6 +8,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -183,12 +184,8 @@ namespace SW.Serverless.Resident
                 Ready = new Ready
                 {
                     MaxInFlight = options.MaxInFlight,
-                    StartupValues = { (IDictionary<string, string>)(StartupValues == null
-                        ? new Dictionary<string, string>()
-                        : new Dictionary<string, string>(StartupValues)) },
-                    AdapterValues = { (IDictionary<string, string>)(AdapterValues == null
-                        ? new Dictionary<string, string>()
-                        : new Dictionary<string, string>(AdapterValues)) }
+                    StartupValues = { WithoutNulls(StartupValues) },
+                    AdapterValues = { WithoutNulls(AdapterValues) }
                 }
             });
 
@@ -479,6 +476,16 @@ namespace SW.Serverless.Resident
             if (State is InstanceState.Ready or InstanceState.Draining && System.Linq.Enumerable.Contains(Capabilities, "cancel"))
                 Send(new HostFrame { Id = id, Cancel = new Cancel() });
         }
+
+        /// <summary>
+        /// The values that have one. A protobuf map can't hold a null and throws on one, which ended
+        /// the stream before the adapter was ever ready: a gateway's validator call has no
+        /// correlation id, for one. Left out, a value reads as absent, which is what null meant.
+        /// </summary>
+        static IDictionary<string, string> WithoutNulls(IEnumerable<KeyValuePair<string, string>> values) =>
+            values == null
+                ? new Dictionary<string, string>()
+                : values.Where(kv => kv.Key != null && kv.Value != null).ToDictionary(kv => kv.Key, kv => kv.Value);
 
         public async Task<Pong> PingAsync(TimeSpan timeout)
         {

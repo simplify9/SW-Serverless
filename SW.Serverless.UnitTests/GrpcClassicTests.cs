@@ -102,6 +102,24 @@ namespace SW.Serverless.UnitTests
             host.Services.GetRequiredService<IResidentAdapterHost>().Describe().Select(h => h.InstanceKey);
 
         [TestMethod]
+        public async Task A_session_without_a_correlation_id_or_with_null_values_still_starts()
+        {
+            // A protobuf map can't hold a null: Bitween's gateway runs validators with no correlation
+            // id, and those sessions failed before the adapter was ready.
+            var service = Service();
+            await service.StartAsync(AdapterId, null, new Dictionary<string, string> { ["Prefix"] = "hi ", ["Unset"] = null });
+            try
+            {
+                Assert.AreEqual("hi world", await service.InvokeAsync<string>("Greet", "world"));
+                Assert.IsTrue(string.IsNullOrEmpty(await service.InvokeAsync<string>("Correlation", null)));
+            }
+            finally
+            {
+                ((IDisposable)service).Dispose();
+            }
+        }
+
+        [TestMethod]
         public async Task A_call_returns_the_adapter_s_answer_using_the_startup_values_it_was_given()
         {
             var service = Service();
