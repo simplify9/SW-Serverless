@@ -135,11 +135,15 @@ namespace SW.Serverless
             var serverlessOptionsBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(serverlessOptions)));
             var adapterValuesBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(adapterMetadata.AdapterValues)));
 
+            // On stdin for an adapter whose SDK reads them there, as arguments for every other.
+            var valuesOnStdin = adapterMetadata.ValuesOnStdin;
             process = new Process
             {
                 StartInfo = new ProcessStartInfo("dotnet")
                 {
-                    Arguments = $"\"{adapterMetadata.LocalPath}\" {serverlessOptionsBase64} {startupValuesBase64} {adapterValuesBase64}",
+                    Arguments = valuesOnStdin
+                        ? $"\"{adapterMetadata.LocalPath}\" {Constants.ValuesOnStdinFlag}"
+                        : $"\"{adapterMetadata.LocalPath}\" {serverlessOptionsBase64} {startupValuesBase64} {adapterValuesBase64}",
                     WorkingDirectory = Path.GetDirectoryName(adapterMetadata.LocalPath),
                     UseShellExecute = false,
 
@@ -163,6 +167,14 @@ namespace SW.Serverless
 
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
+
+            if (valuesOnStdin)
+            {
+                process.StandardInput.WriteLine(serverlessOptionsBase64);
+                process.StandardInput.WriteLine(startupValuesBase64);
+                process.StandardInput.WriteLine(adapterValuesBase64);
+                process.StandardInput.Flush();
+            }
 
             return Task.CompletedTask;
         }
@@ -347,7 +359,8 @@ namespace SW.Serverless
                 LocalPath = installed.LocalPath,
                 Directory = installed.Directory,
                 AdapterValues = installed.AdapterValues,
-                UsesGrpc = UsesGrpc(installed)
+                UsesGrpc = UsesGrpc(installed),
+                ValuesOnStdin = ReadsValuesOnStdin(installed)
             };
         }
 
@@ -356,6 +369,14 @@ namespace SW.Serverless
         /// .NET, whose SDKs speak only that, and for a .NET adapter whose manifest opts in with a
         /// protocol of 2 or more. Every other .NET adapter keeps the text protocol it was built for.
         /// </summary>
+        /// <summary>
+        /// Whether the adapter's SDK reads its values from stdin: known only from the SDK version
+        /// its manifest records. A package without one is from before, and gets them as arguments.
+        /// </summary>
+        internal static bool ReadsValuesOnStdin(InstalledAdapter installed) =>
+            Version.TryParse((installed.Manifest?.SdkVersion ?? "").Split('-', '+')[0], out var sdk) &&
+            sdk >= Version.Parse(Constants.ValuesOnStdinSince);
+
         internal static bool UsesGrpc(InstalledAdapter installed) =>
             !string.Equals(installed.Runtime, Contract.Catalog.AdapterManifest.DotnetRuntime, StringComparison.OrdinalIgnoreCase) ||
             installed.Manifest?.Protocol is { Min: >= 2 };
@@ -416,6 +437,7 @@ namespace SW.Serverless
             public string Directory { get; set; }
             public IDictionary<string, string> AdapterValues { get; set; } = new Dictionary<string, string>();
             public bool UsesGrpc { get; set; }
+            public bool ValuesOnStdin { get; set; }
         }
 
         /// <summary>

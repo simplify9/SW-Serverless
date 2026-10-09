@@ -39,6 +39,8 @@ namespace SW.Serverless.SampleAdapter2
             });
         }
 
+        public Task<object> TestStartupValue(string name) => Task.FromResult<object>(Runner.StartupValueOf(name));
+
         public Task<object> TestString(string value)
         {
             return Task.FromResult((object)value);

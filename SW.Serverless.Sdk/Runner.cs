@@ -81,6 +81,18 @@ namespace SW.Serverless.Sdk
                 Console.OutputEncoding = Encoding.UTF8;
                 var commandLineArgs = Environment.GetCommandLineArgs();
 
+                // A host that knows this SDK sends the values on stdin, off the command line where
+                // any process on the machine could read them. Older hosts still pass them as
+                // arguments, which is still understood.
+                if (commandLineArgs.Length > 1 && commandLineArgs[1] == Constants.ValuesOnStdinFlag)
+                    commandLineArgs = new[]
+                    {
+                        commandLineArgs[0],
+                        await Console.In.ReadLineAsync(),
+                        await Console.In.ReadLineAsync(),
+                        await Console.In.ReadLineAsync(),
+                    };
+
                 try
                 {
                     ServerlessOptions =

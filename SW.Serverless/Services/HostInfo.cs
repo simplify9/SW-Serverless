@@ -12,7 +12,7 @@ namespace SW.Serverless
         /// assembly cannot say which release it is. Raise it with every release that adds something
         /// an adapter could depend on.
         /// </summary>
-        public const string Baseline = "10.0.2";
+        public const string Baseline = "10.1.0";
 
         public static Version Version { get; } = Resolve();
 
