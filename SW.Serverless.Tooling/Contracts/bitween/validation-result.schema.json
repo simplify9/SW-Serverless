@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bitween.systems/contract/v1/validation-result.schema.json",
+  "title": "ValidationResult",
+  "description": "What a validator found. Property names are exactly as shown; unknown properties are allowed and ignored.",
+  "type": "object",
+  "required": ["Validations"],
+  "properties": {
+    "Success": { "type": "boolean", "description": "True when Validations is empty. Bitween derives it from Validations." },
+    "Validations": {
+      "type": "array",
+      "description": "Each failure: a code, often the field it concerns, and a message.",
+      "items": {
+        "type": "object",
+        "required": ["Key", "Value"],
+        "properties": {
+          "Key": { "type": "string" },
+          "Value": { "type": "string" }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

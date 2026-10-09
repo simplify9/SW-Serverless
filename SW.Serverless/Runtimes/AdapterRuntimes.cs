@@ -39,6 +39,9 @@ namespace SW.Serverless.Runtimes
 
         /// <summary>.NET only: workstation GC, the right trade for an adapter that mostly waits.</summary>
         public bool UseWorkstationGc { get; set; }
+
+        /// <summary>Arguments after the entry, such as --describe.</summary>
+        public System.Collections.Generic.IReadOnlyList<string> Arguments { get; set; } = Array.Empty<string>();
     }
 
     /// <summary>
@@ -163,6 +166,7 @@ namespace SW.Serverless.Runtimes
             {
                 var psi = Redirected(executable, Path.GetDirectoryName(entryPath));
                 psi.ArgumentList.Add(entryPath);
+                foreach (var argument in launch.Arguments) psi.ArgumentList.Add(argument);
                 if (launch.UseWorkstationGc) psi.Environment["DOTNET_gcServer"] = "0";
                 if (launch.HardMemoryLimitBytes > 0)
                 {
@@ -181,8 +185,12 @@ namespace SW.Serverless.Runtimes
             // Nothing to install: the package carries everything it needs.
             public Task<RuntimeStatus> DetectAsync() => Task.FromResult(RuntimeStatus.Present("native"));
 
-            public ProcessStartInfo StartInfo(string entryPath, RuntimeLaunch launch) =>
-                Redirected(entryPath, Path.GetDirectoryName(entryPath));
+            public ProcessStartInfo StartInfo(string entryPath, RuntimeLaunch launch)
+            {
+                var psi = Redirected(entryPath, Path.GetDirectoryName(entryPath));
+                foreach (var argument in launch.Arguments) psi.ArgumentList.Add(argument);
+                return psi;
+            }
         }
 
         sealed class PythonRuntime(string executable) : IAdapterRuntime
@@ -197,6 +205,7 @@ namespace SW.Serverless.Runtimes
                 // Unbuffered, so what it writes reaches the host's diagnostics when it's written.
                 psi.ArgumentList.Add("-u");
                 psi.ArgumentList.Add(entryPath);
+                foreach (var argument in launch.Arguments) psi.ArgumentList.Add(argument);
                 psi.Environment["PYTHONUNBUFFERED"] = "1";
                 psi.Environment["PYTHONDONTWRITEBYTECODE"] = "1";
                 // Python has no heap ceiling of its own; the watchdog and, where the container
@@ -219,6 +228,7 @@ namespace SW.Serverless.Runtimes
                     // adapter, as DOTNET_GCHeapHardLimit does for .NET.
                     psi.ArgumentList.Add($"--max-old-space-size={Math.Max(16, launch.HardMemoryLimitBytes / (1024 * 1024))}");
                 psi.ArgumentList.Add(entryPath);
+                foreach (var argument in launch.Arguments) psi.ArgumentList.Add(argument);
                 return psi;
             }
         }

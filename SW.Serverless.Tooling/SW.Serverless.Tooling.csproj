@@ -11,7 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
     <PackageReference Include="SimplyWorks.CloudFiles.AS" Version="10.0.0" />
     <PackageReference Include="SimplyWorks.CloudFiles.AS.Extensions" Version="10.0.0" />
     <PackageReference Include="SimplyWorks.CloudFiles.GC.Extensions" Version="10.0.0" />
@@ -21,11 +21,21 @@
     <PackageReference Include="SimplyWorks.CloudFiles.OC" Version="10.0.0" />
     <PackageReference Include="SimplyWorks.CloudFiles.S3.Extensions" Version="10.0.0" />
     <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.11" />
+    <PackageReference Include="NJsonSchema" Version="11.6.1" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- The manifest and catalog model, so what the tools write is exactly what hosts and Bitween read. -->
     <ProjectReference Include="..\SW.Serverless.Contract\SW.Serverless.Contract.csproj" />
+    <!-- The host itself, so the conformance kit runs an adapter exactly as a host would. -->
+    <ProjectReference Include="..\SW.Serverless\SW.Serverless.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Contracts the kit knows by name. The Bitween one is copied from Bitween-api's
+         SW.Bitween.Adapters/Contract; once SimplyWorks.Bitween.Adapters is published, reference it
+         instead so the two can't drift. -->
+    <EmbeddedResource Include="Contracts/**/*.json" LogicalName="SW.Serverless.Tooling.Contracts.%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bitween.systems/contract/v1/exchange-file.schema.json",
+  "title": "ExchangeFile",
+  "description": "A file as Bitween passes it to and from adapters. Property names are exactly as shown; unknown properties are allowed and ignored.",
+  "type": "object",
+  "required": ["Data"],
+  "properties": {
+    "Filename": { "type": ["string", "null"], "description": "The file's name, when it has one." },
+    "Data": { "type": "string", "description": "The content: text, or base64 for binary content." },
+    "Hash": { "type": ["string", "null"], "description": "SHA-1 of Data as lower-case hex. Written by .NET adapters; always recomputed from Data when read, never trusted." },
+    "BadData": { "type": "boolean", "default": false, "description": "Whether this is a bad response: a delivery the partner rejected." },
+    "ContentType": { "type": ["string", "null"], "description": "The content's media type, when known." }
+  },
+  "additionalProperties": true
+}
