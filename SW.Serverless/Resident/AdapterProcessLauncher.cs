@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using SW.Serverless.Runtimes;
 using SW.Serverless.Sdk.Resident;
 using System;
 using System.Diagnostics;
@@ -15,11 +16,13 @@ namespace SW.Serverless.Resident
     {
         readonly ResidentOptions options;
         readonly ILogger logger;
+        readonly AdapterRuntimes runtimes;
 
-        public AdapterProcessLauncher(ResidentOptions options, ILogger logger)
+        public AdapterProcessLauncher(ResidentOptions options, ILogger logger, AdapterRuntimes runtimes)
         {
             this.options = options;
             this.logger = logger;
+            this.runtimes = runtimes;
         }
 
         public Process Launch(AdapterSpec spec, ResidentAdapterInstance instance)
@@ -31,28 +34,42 @@ namespace SW.Serverless.Resident
             if (!File.Exists(assembly))
                 throw new FileNotFoundException($"Adapter entry assembly not found.", assembly);
 
-            var executable = spec.Executable ?? "dotnet";
-            var arguments = executable == "dotnet" ? $"\"{assembly}\"" : "";
-
-            var psi = new ProcessStartInfo(executable)
-            {
-                Arguments = arguments,
-                WorkingDirectory = Path.GetDirectoryName(assembly),
-                UseShellExecute = false,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-
-            // Workstation GC: server GC allocates a heap and a GC thread per core, which is the
-            // wrong trade for an adapter that mostly waits on a socket.
-            if (options.UseWorkstationGc) psi.Environment["DOTNET_gcServer"] = "0";
-
             var hard = spec.HardMemoryLimitBytes > 0 ? spec.HardMemoryLimitBytes : options.HardMemoryLimitBytes;
-            if (hard > 0)
+            ProcessStartInfo psi;
+            if (!string.IsNullOrWhiteSpace(spec.Executable))
             {
-                psi.Environment["DOTNET_GCHeapHardLimit"] = hard.ToString("X");
-                psi.Environment["DOTNET_GCConserveMemory"] = "5";
+                // An executable set by the caller or the package's metadata, as before runtimes:
+                // dotnet with the assembly, anything else started bare.
+                var arguments = spec.Executable == "dotnet" ? $"\"{assembly}\"" : "";
+                psi = new ProcessStartInfo(spec.Executable)
+                {
+                    Arguments = arguments,
+                    WorkingDirectory = Path.GetDirectoryName(assembly),
+                    UseShellExecute = false,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+
+                // Workstation GC: server GC allocates a heap and a GC thread per core, which is the
+                // wrong trade for an adapter that mostly waits on a socket.
+                if (options.UseWorkstationGc) psi.Environment["DOTNET_gcServer"] = "0";
+                if (hard > 0)
+                {
+                    psi.Environment["DOTNET_GCHeapHardLimit"] = hard.ToString("X");
+                    psi.Environment["DOTNET_GCConserveMemory"] = "5";
+                }
+            }
+            else
+            {
+                var runtime = runtimes.Find(spec.Runtime)
+                              ?? throw new NotSupportedException(
+                                  $"Adapter '{spec.AdapterId}' needs the '{spec.Runtime}' runtime, which this host does not have.");
+                psi = runtime.StartInfo(assembly, new RuntimeLaunch
+                {
+                    HardMemoryLimitBytes = hard,
+                    UseWorkstationGc = options.UseWorkstationGc,
+                });
             }
 
             var process = new Process { StartInfo = psi, EnableRaisingEvents = true };

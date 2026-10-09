@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SW.CloudFiles.Extensions;
 using SW.PrimitiveTypes;
+using SW.Serverless.Runtimes;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -54,10 +55,27 @@ namespace SW.Serverless.UnitTests
             try { Directory.Delete(Path.GetDirectoryName(localRoot)!, true); } catch { }
         }
 
-        static AdapterInstaller Installer() => new(
+        static AdapterInstaller Installer(AdapterRuntimeOptions runtimes = null) => new(
             services.GetRequiredService<ServerlessOptions>(),
             new MemoryCache(new MemoryCacheOptions()),
-            cloudFiles);
+            cloudFiles,
+            new AdapterRuntimes(runtimes));
+
+        /// <summary>A host whose interpreters are at paths that don't exist, whatever this machine has.</summary>
+        static AdapterRuntimeOptions NoInterpreters => new()
+        {
+            PythonExecutable = "/nonexistent/python3",
+            NodeExecutable = "/nonexistent/node",
+        };
+
+        /// <summary>A host whose "python" answers with a fixed version, so version checks don't depend on this machine.</summary>
+        static AdapterRuntimeOptions PythonReporting(string version)
+        {
+            var script = Path.Combine(Path.GetTempPath(), $"fake-python-{Guid.NewGuid():N}.sh");
+            File.WriteAllText(script, $"#!/bin/sh\necho \"Python {version}\"\n");
+            File.SetUnixFileMode(script, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            return new AdapterRuntimeOptions { PythonExecutable = script };
+        }
 
         static async Task Publish(string adapterId, IDictionary<string, string> entries,
             string hash, string entryAssembly = "Adapter.dll", string key = null)
@@ -208,14 +226,90 @@ namespace SW.Serverless.UnitTests
         [TestMethod]
         public async Task A_runtime_the_host_cannot_launch_is_refused_by_name()
         {
+            await Publish("needs-ruby", new Dictionary<string, string>
+            {
+                ["main.rb"] = "puts",
+                ["adapter.json"] = """{ "runtime": "ruby", "entry": "main.rb" }"""
+            }, hash: "rb1", entryAssembly: "main.rb");
+
+            var error = await Assert.ThrowsExceptionAsync<NotSupportedException>(() => Installer().InstallAsync("needs-ruby"));
+            StringAssert.Contains(error.Message, "'ruby'");
+        }
+
+        [TestMethod]
+        public async Task A_known_runtime_missing_from_the_host_is_refused_saying_so()
+        {
             await Publish("needs-python", new Dictionary<string, string>
             {
                 ["main.py"] = "print()",
                 ["adapter.json"] = """{ "runtime": "python", "entry": "main.py" }"""
             }, hash: "py1", entryAssembly: "main.py");
 
-            var error = await Assert.ThrowsExceptionAsync<NotSupportedException>(() => Installer().InstallAsync("needs-python"));
-            StringAssert.Contains(error.Message, "python");
+            var error = await Assert.ThrowsExceptionAsync<NotSupportedException>(() =>
+                Installer(NoInterpreters).InstallAsync("needs-python"));
+            StringAssert.Contains(error.Message, "'python'");
+            StringAssert.Contains(error.Message, "not installed");
+        }
+
+        [TestMethod]
+        public async Task A_runtime_version_outside_the_manifest_s_range_is_refused_and_one_inside_installs()
+        {
+            await Publish("needs-python312", new Dictionary<string, string>
+            {
+                ["main.py"] = "print()",
+                ["adapter.json"] = """{ "runtime": "python", "runtimeVersion": ">=3.12", "entry": "main.py" }"""
+            }, hash: "py312", entryAssembly: "main.py");
+
+            var error = await Assert.ThrowsExceptionAsync<NotSupportedException>(() =>
+                Installer(PythonReporting("3.11.9")).InstallAsync("needs-python312"));
+            StringAssert.Contains(error.Message, ">=3.12");
+            StringAssert.Contains(error.Message, "3.11.9");
+
+            var installed = await Installer(PythonReporting("3.12.4")).InstallAsync("needs-python312");
+            Assert.AreEqual("python", installed.Runtime);
+            Assert.IsTrue(installed.LocalPath.EndsWith("main.py"));
+        }
+
+        [TestMethod]
+        public async Task A_package_for_other_platforms_is_refused_and_one_for_this_platform_runs_its_own_entry()
+        {
+            await Publish("elsewhere", new Dictionary<string, string>
+            {
+                ["adapter"] = "binary",
+                ["adapter.json"] = """{ "runtime": "exec", "entry": "adapter", "platforms": ["plan9-mips"] }"""
+            }, hash: "ex1", entryAssembly: "adapter");
+            var error = await Assert.ThrowsExceptionAsync<NotSupportedException>(() => Installer().InstallAsync("elsewhere"));
+            StringAssert.Contains(error.Message, "plan9-mips");
+
+            var here = AdapterRuntimes.CurrentPlatform;
+            await Publish("everywhere", new Dictionary<string, string>
+            {
+                ["default/adapter"] = "default build",
+                [$"{here}/adapter"] = "this platform's build",
+                ["adapter.json"] = $$"""{ "runtime": "exec", "entry": "default/adapter", "platforms": ["{{here}}", "plan9-mips"], "entries": { "{{here}}": "{{here}}/adapter" } }"""
+            }, hash: "ex2", entryAssembly: "default/adapter");
+
+            var installed = await Installer().InstallAsync("everywhere");
+            Assert.AreEqual("this platform's build", File.ReadAllText(installed.LocalPath));
+            if (!OperatingSystem.IsWindows())
+                Assert.IsTrue(File.GetUnixFileMode(installed.LocalPath).HasFlag(UnixFileMode.UserExecute),
+                    "an exec entry must be executable after unpacking");
+        }
+
+        [TestMethod]
+        public async Task A_dotnet_adapter_installs_without_asking_whether_dotnet_is_there()
+        {
+            // As before runtimes: production images carry the runtime without the SDK, and a
+            // .NET adapter was never refused for want of a check.
+            await Publish("plain-dotnet", new Dictionary<string, string>
+            {
+                ["Adapter.dll"] = "assembly",
+                ["adapter.json"] = """{ "runtime": "dotnet", "entry": "Adapter.dll" }"""
+            }, hash: "dn1");
+
+            var installed = await Installer(new AdapterRuntimeOptions { DotnetExecutable = "/nonexistent/dotnet" })
+                .InstallAsync("plain-dotnet");
+            Assert.AreEqual("dotnet", installed.Runtime);
         }
 
         [TestMethod]

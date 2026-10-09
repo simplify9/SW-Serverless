@@ -17,6 +17,10 @@ namespace SW.Serverless.Resident
     {
         public string EntryAssemblyPath { get; set; }
         public string Executable { get; set; }
+
+        /// <summary>The runtime it runs on, from its manifest; empty means dotnet.</summary>
+        public string Runtime { get; set; }
+
         public System.Collections.Generic.IDictionary<string, string> AdapterValues { get; set; }
 
         /// <summary>The extraction directory, when installed from storage. Held while the adapter runs.</summary>
@@ -36,6 +40,7 @@ namespace SW.Serverless.Resident
                 {
                     EntryAssemblyPath = spec.EntryAssemblyPath,
                     Executable = spec.Executable,
+                    Runtime = spec.Runtime,
                     AdapterValues = spec.AdapterValues
                 };
 
@@ -53,6 +58,7 @@ namespace SW.Serverless.Resident
                 EntryAssemblyPath = installed.LocalPath,
                 Directory = installed.Directory,
                 Executable = spec.Executable ?? (values.TryGetValue("Executable", out var exe) ? exe : null),
+                Runtime = installed.Runtime,
                 AdapterValues = values
             };
         }

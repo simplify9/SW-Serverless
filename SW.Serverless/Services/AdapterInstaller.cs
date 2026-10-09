@@ -1,3 +1,4 @@
+using SW.Serverless.Runtimes;
 using Microsoft.Extensions.Caching.Memory;
 using SW.PrimitiveTypes;
 using SW.Serverless.Contract.Catalog;
@@ -25,13 +26,15 @@ namespace SW.Serverless
         readonly ServerlessOptions options;
         readonly IMemoryCache memoryCache;
         readonly ICloudFilesService cloudFilesService;
+        readonly AdapterRuntimes runtimes;
 
         public AdapterInstaller(ServerlessOptions options, IMemoryCache memoryCache,
-            ICloudFilesService cloudFilesService)
+            ICloudFilesService cloudFilesService, AdapterRuntimes runtimes = null)
         {
             this.options = options;
             this.memoryCache = memoryCache;
             this.cloudFilesService = cloudFilesService;
+            this.runtimes = runtimes ?? new AdapterRuntimes(null);
         }
 
         /// <summary>
@@ -61,7 +64,7 @@ namespace SW.Serverless
 
             PruneSupersededVersions(adapterId, directory);
 
-            ApplyManifest(metadata);
+            await ApplyManifestAsync(metadata);
             return metadata;
         }
 
@@ -71,7 +74,7 @@ namespace SW.Serverless
         /// the package, while metadata can be changed without touching it. A package without a
         /// manifest — every package published before them — is left exactly as its metadata says.
         /// </summary>
-        void ApplyManifest(InstalledAdapter installed)
+        async Task ApplyManifestAsync(InstalledAdapter installed)
         {
             if (installed.Manifest != null || string.IsNullOrEmpty(installed.Directory)) return;
 
@@ -89,24 +92,53 @@ namespace SW.Serverless
                     $"Adapter '{installed.AdapterId}' has an {AdapterManifest.FileName} that cannot be read: {ex.Message}", ex);
             }
 
-            // A runtime this host has no launcher for is refused now, with its name, rather than
-            // started with dotnet and failing in a way that says nothing about why.
-            if (!string.IsNullOrWhiteSpace(manifest.Runtime) &&
-                !string.Equals(manifest.Runtime, AdapterManifest.DotnetRuntime, StringComparison.OrdinalIgnoreCase))
+            // Everything that would stop it running is refused now, saying why, rather than found
+            // out by a process that fails to start, or starts on the wrong runtime.
+            var runtimeName = string.IsNullOrWhiteSpace(manifest.Runtime) ? AdapterManifest.DotnetRuntime : manifest.Runtime;
+            if (runtimes.Find(runtimeName) == null)
                 throw new NotSupportedException(
-                    $"Adapter '{installed.AdapterId}' needs the '{manifest.Runtime}' runtime, which this host does not have.");
+                    $"Adapter '{installed.AdapterId}' needs the '{runtimeName}' runtime, which this host does not have.");
+
+            // .NET adapters have always been started without asking whether dotnet is there, and
+            // still are: only a version the manifest asks for is checked. Every other runtime is
+            // checked before anything is started.
+            var isDotnet = string.Equals(runtimeName, AdapterManifest.DotnetRuntime, StringComparison.OrdinalIgnoreCase);
+            if (!isDotnet || !string.IsNullOrWhiteSpace(manifest.RuntimeVersion))
+            {
+                var status = await runtimes.StatusAsync(runtimeName);
+                if (!status.Available)
+                    throw new NotSupportedException(
+                        $"Adapter '{installed.AdapterId}' needs the '{runtimeName}' runtime, which this host does not have: {status.Reason}.");
+                if (!RuntimeVersionRange.Satisfies(manifest.RuntimeVersion, status.Version))
+                    throw new NotSupportedException(
+                        $"Adapter '{installed.AdapterId}' needs {runtimeName} {manifest.RuntimeVersion}; this host has {status.Version}.");
+            }
+
+            var platform = AdapterRuntimes.CurrentPlatform;
+            if (manifest.Platforms is { Count: > 0 } platforms &&
+                !platforms.Contains(platform, StringComparer.OrdinalIgnoreCase))
+                throw new NotSupportedException(
+                    $"Adapter '{installed.AdapterId}' is built for {string.Join(", ", platforms)}; this host is {platform}.");
 
             if (!HostInfo.Satisfies(manifest.Compatibility?.MinHostVersion))
                 throw new InvalidOperationException(
                     $"Adapter '{installed.AdapterId}' needs SW.Serverless {manifest.Compatibility.MinHostVersion} or later; this host is {HostInfo.Version}.");
 
-            if (!string.IsNullOrWhiteSpace(manifest.Entry))
+            var entry = manifest.EntryFor(platform);
+            if (!string.IsNullOrWhiteSpace(entry))
             {
-                installed.LocalPath = ContainedPath(installed.Directory, manifest.Entry.Replace("\\", "/"))
+                installed.LocalPath = ContainedPath(installed.Directory, entry.Replace("\\", "/"))
                                       ?? throw new InvalidOperationException(
-                                          $"Adapter '{installed.AdapterId}' declares an entry outside its package: '{manifest.Entry}'.");
-                installed.EntryAssembly = manifest.Entry;
+                                          $"Adapter '{installed.AdapterId}' declares an entry outside its package: '{entry}'.");
+                installed.EntryAssembly = entry;
             }
+
+            // A zip doesn't reliably carry the execute bit, and an exec adapter's entry is the
+            // program itself.
+            if (string.Equals(runtimeName, AdapterManifest.ExecRuntime, StringComparison.OrdinalIgnoreCase) &&
+                !OperatingSystem.IsWindows() && File.Exists(installed.LocalPath))
+                File.SetUnixFileMode(installed.LocalPath, File.GetUnixFileMode(installed.LocalPath) |
+                                                          UnixFileMode.UserExecute | UnixFileMode.GroupExecute);
 
             installed.Manifest = manifest;
         }
@@ -417,6 +449,9 @@ namespace SW.Serverless
 
         /// <summary>The package's own description, once installed. Null for a package without one.</summary>
         public AdapterManifest Manifest { get; set; }
+
+        /// <summary>The runtime it runs on: the manifest's, or dotnet for a package without one.</summary>
+        public string Runtime => string.IsNullOrWhiteSpace(Manifest?.Runtime) ? AdapterManifest.DotnetRuntime : Manifest.Runtime;
 
         public IDictionary<string, string> AdapterValues { get; set; } = new Dictionary<string, string>();
     }
