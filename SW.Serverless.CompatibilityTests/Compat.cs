@@ -146,6 +146,28 @@ public static class Compat
     }
 
     /// <summary>Runs the host built on the PUBLISHED SimplyWorks.Serverless 10.0.0 as its own process.</summary>
+    /// <summary>Reads a manifest file with the parser published in SimplyWorks.Serverless.Contract 10.0.2.</summary>
+    public static async Task<OldHostRun> ReadWithManifestV1002Async(string manifestPath)
+    {
+        var entry = System.IO.Path.Combine(BuildOutput("SW.Serverless.Compat.ManifestV1002"), "SW.Serverless.Compat.ManifestV1002.dll");
+        var start = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        start.ArgumentList.Add(entry);
+        start.ArgumentList.Add(manifestPath);
+
+        using var process = Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(60_000))
+        {
+            process.Kill(true);
+            Assert.Fail("the 10.0.2 manifest reader did not finish within a minute");
+        }
+
+        var lines = (await stdout).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.TrimEnd('\r')).ToList();
+        lines.AddRange((await stderr).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => "stderr: " + l.TrimEnd('\r')));
+        return new OldHostRun(process.ExitCode, lines);
+    }
+
     public static async Task<OldHostRun> RunOldHostAsync(Bucket bucket, string adapter, params string[] args)
     {
         var entry = System.IO.Path.Combine(BuildOutput("SW.Serverless.Compat.OldHost"), "SW.Serverless.Compat.OldHost.dll");
