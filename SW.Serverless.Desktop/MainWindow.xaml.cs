@@ -1,6 +1,6 @@
 ﻿using Microsoft.Win32;
 using Newtonsoft.Json;
-using SW.Serverless.Installer.Shared;
+using SW.Serverless.Tooling;
 using System;
 using System.Collections.Generic;
 using System.IO;

@@ -111,6 +111,18 @@ namespace SW.Serverless.Resident
         internal IDisposable DirectoryLease { get; set; }
 
         public string SdkVersion { get; internal set; }
+
+        /// <summary>The SDK's language — dotnet, python, node, go — or empty from an SDK that predates it.</summary>
+        public string SdkLanguage { get; internal set; }
+
+        /// <summary>The settings the adapter says it reads; empty from an SDK that predates them.</summary>
+        public IReadOnlyCollection<AdapterSetting> Settings { get; internal set; } = Array.Empty<AdapterSetting>();
+
+        /// <summary>The kinds it implements for a contract, e.g. handler or receiver for Bitween.</summary>
+        public IReadOnlyCollection<string> Kinds { get; internal set; } = Array.Empty<string>();
+
+        /// <summary>The contracts it implements and their versions, e.g. bitween → 1.</summary>
+        public IReadOnlyDictionary<string, int> Contracts { get; internal set; } = new Dictionary<string, int>();
         public int ProtocolVersion { get; internal set; }
         public IReadOnlyDictionary<string, string> AdapterValues { get; internal set; }
 

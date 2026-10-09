@@ -24,6 +24,12 @@ namespace SW.Serverless.Resident
         /// </summary>
         public string ParameterSchema { get; set; }
 
+        /// <summary>The argument's JSON Schema, from an SDK in any language. Empty when not given.</summary>
+        public string InputSchema { get; set; }
+
+        /// <summary>The result's JSON Schema, from an SDK in any language. Empty when not given.</summary>
+        public string OutputSchema { get; set; }
+
         /// <summary>False for a command returning Task rather than Task&lt;T&gt;.</summary>
         public bool ReturnsValue { get; set; }
 
@@ -34,5 +40,22 @@ namespace SW.Serverless.Resident
 
         public override string ToString() =>
             $"{Name}({ParameterType}){(ReturnsValue ? "" : " -> void")}";
+    }
+
+    /// <summary>One setting an adapter says it reads, in any language.</summary>
+    public class AdapterSetting
+    {
+        public string Name { get; set; }
+        public string Description { get; set; }
+        public bool Required { get; set; }
+
+        /// <summary>Masked wherever it's shown, never logged.</summary>
+        public bool Secret { get; set; }
+
+        /// <summary>Empty when the setting has no default.</summary>
+        public string DefaultValue { get; set; }
+
+        /// <summary>text, multiline, number, boolean, select or json.</summary>
+        public string Type { get; set; }
     }
 }

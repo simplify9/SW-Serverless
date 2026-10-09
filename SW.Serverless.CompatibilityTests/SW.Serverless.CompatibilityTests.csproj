@@ -30,6 +30,8 @@
         <!-- Build order only: these run as separate processes, or are packaged and installed. -->
         <ProjectReference Include="..\SW.Serverless.Compat.OldHost\SW.Serverless.Compat.OldHost.csproj"
                           ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\SW.Serverless.Compat.ManifestV1002\SW.Serverless.Compat.ManifestV1002.csproj"
+                          ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\SW.Serverless.Compat.ClassicV10\SW.Serverless.Compat.ClassicV10.csproj"
                           ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\SW.Serverless.Compat.ResidentV10\SW.Serverless.Compat.ResidentV10.csproj"

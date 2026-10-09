@@ -110,6 +110,18 @@ namespace SW.Serverless.Sdk.Resident
         /// </summary>
         public static async Task RunAsync(Type handlerType, Func<IAdapterContext, object> handlerFactory)
         {
+            // --describe: say what this adapter is, without a host, and exit.
+            if (Describer.Requested(Environment.GetCommandLineArgs()))
+            {
+                // Commands come from the type, as they do for Hello, built or not.
+                await Describer.Print(Describer.Describe(handlerType, () => handlerFactory(null),
+                    Contract.Catalog.AdapterManifest.ResidentLifecycle,
+                    _ => BuildCommands(handlerType).Select(c => (c.Key, c.Value.ParameterType,
+                        c.Value.Void ? null : Describer.ResultOf(c.Value.MethodInfo),
+                        c.Value.MethodInfo.GetCustomAttribute<AdapterCommandAttribute>()?.Description))));
+                return;
+            }
+
             var runner = new ResidentRunner(handlerType, handlerFactory);
             try
             {
@@ -160,7 +172,28 @@ namespace SW.Serverless.Sdk.Resident
                     AdapterId = handshake.AdapterId ?? "",
                     InstanceKey = handshake.InstanceKey ?? "",
                     ProtocolVersion = protocol,
-                    SdkVersion = typeof(ResidentRunner).Assembly.GetName().Version?.ToString() ?? "0.0.0",
+                    SdkVersion = SdkInfo.Version,
+                    SdkLanguage = "dotnet",
+                    Kinds = { handlerType.GetCustomAttributes<AdapterKindAttribute>(true).Select(k => k.Kind).Distinct() },
+                    Contracts =
+                    {
+                        handlerType.GetCustomAttributes<AdapterContractAttribute>(true)
+                            .GroupBy(c => c.Name).ToDictionary(g => g.Key, g => g.Max(c => c.Version))
+                    },
+                    // Declared with Runner.Expect by the time the handshake goes: so in a handler
+                    // that was constructed before it was handed to the runner, which is the usual way.
+                    Settings =
+                    {
+                        Runner.DeclaredStartupValues.Select(kv => new SettingInfo
+                        {
+                            Name = kv.Key,
+                            Description = kv.Value.Description ?? "",
+                            Required = !kv.Value.Optional,
+                            Secret = kv.Value.Private,
+                            DefaultValue = kv.Value.Default ?? "",
+                            Type = kv.Value.Type ?? "text",
+                        })
+                    },
                     Capabilities = { Capabilities() },
                     Commands = { CommandInfos() }
                 }

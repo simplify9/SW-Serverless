@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace SW.Serverless.Installer.Shared;
+namespace SW.Serverless.Tooling;
 
 public static class Semver
 {

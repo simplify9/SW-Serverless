@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 
-namespace SW.Serverless.Installer.Shared
+namespace SW.Serverless.Tooling
 {
     public class InstallerLogic
     {
@@ -36,7 +36,7 @@ namespace SW.Serverless.Installer.Shared
                     Arguments = $"publish \"{projectPath}\" -c Release -o \"{outputPath}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                }
+                }.WithoutLingeringNodes()
             };
 
             process.OutputDataReceived += OutputDataReceived;
@@ -99,7 +99,7 @@ namespace SW.Serverless.Installer.Shared
                     Arguments = $"msbuild \"{projectPath}\" -getProperty:AssemblyName -p:Configuration=Release",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                });
+                }.WithoutLingeringNodes());
                 if (process == null) return null;
 
                 var stderr = process.StandardError.ReadToEndAsync();

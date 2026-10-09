@@ -8,7 +8,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Threading.Tasks;
 
-namespace SW.Serverless.Installer.Shared
+namespace SW.Serverless.Tooling
 {
     /// <summary>What goes into storage for one package, beside the zip itself.</summary>
     public class PackageInfo
@@ -212,13 +212,24 @@ namespace SW.Serverless.Installer.Shared
             if ((await LocateVersionsAsync(adapterId)).ContainsKey(version))
                 throw new SWException($"Version {version} of '{adapterId}' has already been published.");
 
+            // An id keeps its runtime: hosts that predate manifests run adapters/{id} with dotnet,
+            // and would go on running the old .NET package under an id that had moved on.
+            var runsOnDotnet = RunsOnDotnet(package.Manifest);
+            if (!runsOnDotnet && await ExistsAsync(CurrentKey(adapterId)))
+                throw new SWException(
+                    $"'{adapterId}' is a .NET adapter, and older hosts would keep running that under its id. " +
+                    $"Publish the {package.Manifest!.Runtime} adapter under a new id.");
+
             // Loaded before uploading, so the new version is not mistaken for one the catalog missed.
             var entry = await LoadEntryAsync(adapterId);
             var sha256 = InstallerLogic.Sha256Of(zipPath);
             var metadata = LegacyMetadata(package.EntryAssembly, package.Lifecycle, package.Kind, sha256, version);
 
             await UploadAsync(versionKey, zipPath, metadata);
-            if (promote) await UploadAsync(CurrentKey(adapterId), zipPath, metadata);
+            // adapters/{id} is what hosts before manifests list and run, always with dotnet. An
+            // adapter in another runtime never goes there; newer hosts find its current version in
+            // the catalog.
+            if (promote && runsOnDotnet) await UploadAsync(CurrentKey(adapterId), zipPath, metadata);
 
             entry.Versions.Add(new AdapterVersionRecord
             {
@@ -245,6 +256,12 @@ namespace SW.Serverless.Installer.Shared
         /// </summary>
         public async Task PublishUnversionedAsync(string adapterId, string zipPath, PackageInfo package)
         {
+            // An unversioned package lives only at adapters/{id}, where older hosts would start it
+            // with dotnet whatever it is written in.
+            if (!RunsOnDotnet(package.Manifest))
+                throw new SWException(
+                    $"A {package.Manifest!.Runtime} adapter must be published with a version (-v), so older hosts never see it.");
+
             var entry = await LoadEntryAsync(adapterId);
             var sha256 = InstallerLogic.Sha256Of(zipPath);
 
@@ -254,6 +271,11 @@ namespace SW.Serverless.Installer.Shared
             MakeCurrent(entry, null, package.Manifest, sha256, package.IconDataUri);
             await catalog.SaveAsync(entry);
         }
+
+        /// <summary>A package with no manifest, or no runtime in it, is .NET — as every package before manifests was.</summary>
+        static bool RunsOnDotnet(AdapterManifest manifest) =>
+            string.IsNullOrWhiteSpace(manifest?.Runtime) ||
+            string.Equals(manifest.Runtime, AdapterManifest.DotnetRuntime, StringComparison.OrdinalIgnoreCase);
 
         static void MakeCurrent(AdapterCatalogEntry entry, string version, AdapterManifest manifest, string sha256,
             string iconDataUri)
@@ -306,6 +328,19 @@ namespace SW.Serverless.Installer.Shared
                         $"({Short(expected)} recorded, {Short(sha256)} in storage). Nothing was changed.");
 
                 var manifest = ReadManifest(zipPath) ?? record.Manifest;
+
+                // Another runtime is never copied to adapters/{id}, where hosts before manifests
+                // would start it with dotnet: being current is the catalog's alone.
+                if (!RunsOnDotnet(manifest))
+                {
+                    record.Sha256 ??= sha256;
+                    record.Manifest ??= manifest;
+                    MakeCurrent(entry, version, manifest, sha256, IconFromPackage(zipPath, manifest));
+                    await catalog.SaveAsync(entry);
+                    log($"Version {version} of '{adapterId}' is now current.");
+                    return;
+                }
+
                 var entryAssembly = Value(versionMetadata, "EntryAssembly") ?? manifest?.Entry;
                 if (string.IsNullOrWhiteSpace(entryAssembly))
                     throw new SWException(

@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SW.Serverless.Installer.Shared;
+using SW.Serverless.Tooling;
 
 namespace SW.Serverless.Installer.UnitTests;
 

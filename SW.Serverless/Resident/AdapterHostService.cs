@@ -63,12 +63,25 @@ namespace SW.Serverless.Resident
                     ParameterType = c.ParameterType,
                     ParameterSchema = c.ParameterSchema,
                     ReturnsValue = c.ReturnsValue,
-                    Description = c.Description
+                    Description = c.Description,
+                    InputSchema = c.InputSchema,
+                    OutputSchema = c.OutputSchema
                 })
                 .OrderBy(c => c.Name)
                 .ToArray();
 
             instance.SdkVersion = first.Hello.SdkVersion;
+            // Empty from an SDK that predates them, which is fine: they describe, they don't decide.
+            instance.SdkLanguage = first.Hello.SdkLanguage;
+            instance.Settings = first.Hello.Settings
+                .Select(x => new AdapterSetting
+                {
+                    Name = x.Name, Description = x.Description, Required = x.Required, Secret = x.Secret,
+                    DefaultValue = x.DefaultValue, Type = x.Type
+                })
+                .ToArray();
+            instance.Kinds = first.Hello.Kinds.ToArray();
+            instance.Contracts = first.Hello.Contracts.ToDictionary(kv => kv.Key, kv => kv.Value);
             instance.ProtocolVersion = first.Hello.ProtocolVersion;
 
             logger.LogInformation(

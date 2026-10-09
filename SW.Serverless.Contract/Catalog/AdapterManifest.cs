@@ -26,6 +26,10 @@ namespace SW.Serverless.Contract.Catalog
         public const string ClassicLifecycle = "classic";
         public const string ResidentLifecycle = "resident";
         public const string DotnetRuntime = "dotnet";
+        /// <summary>A self-contained executable — Go, Rust, a native-compiled .NET app.</summary>
+        public const string ExecRuntime = "exec";
+        public const string PythonRuntime = "python";
+        public const string NodeRuntime = "node";
 
         public int ManifestVersion { get; set; } = CurrentManifestVersion;
 
@@ -78,6 +82,31 @@ namespace SW.Serverless.Contract.Catalog
         /// <summary>The file the runtime starts, relative to the package root.</summary>
         public string Entry { get; set; }
 
+        /// <summary>
+        /// The runtime versions it needs, e.g. "&gt;=3.12" for Python. A host refuses to install it
+        /// when the runtime it has is outside. Absent means any.
+        /// </summary>
+        public string RuntimeVersion { get; set; }
+
+        /// <summary>
+        /// The platforms it runs on — linux-x64, linux-arm64, osx-arm64, win-x64 — for a package
+        /// with platform-specific contents, such as an exec binary or Python wheels with native code.
+        /// Absent means it runs anywhere its runtime does.
+        /// </summary>
+        public List<string> Platforms { get; set; }
+
+        /// <summary>
+        /// A per-platform <see cref="Entry"/>, for a package carrying one build per platform.
+        /// <see cref="Entry"/> stays the default, and stays what readers before this field use.
+        /// </summary>
+        public Dictionary<string, string> Entries { get; set; }
+
+        /// <summary>The contracts it implements and their versions, e.g. bitween → 1.</summary>
+        public Dictionary<string, int> Contracts { get; set; }
+
+        /// <summary>The source the package was built from, when it carries it.</summary>
+        public AdapterSource Source { get; set; }
+
         /// <summary><see cref="ClassicLifecycle"/> or <see cref="ResidentLifecycle"/>.</summary>
         public string Lifecycle { get; set; } = ClassicLifecycle;
 
@@ -116,6 +145,10 @@ namespace SW.Serverless.Contract.Catalog
 
         public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);
 
+        /// <summary>What the runtime starts on <paramref name="platform"/>: its own entry, or the default.</summary>
+        public string EntryFor(string platform) =>
+            platform != null && Entries != null && Entries.TryGetValue(platform, out var entry) ? entry : Entry;
+
         public bool IsResident =>
             string.Equals(Lifecycle, ResidentLifecycle, StringComparison.OrdinalIgnoreCase);
 
@@ -123,6 +156,9 @@ namespace SW.Serverless.Contract.Catalog
 
         static readonly Regex IdPattern = new(@"^[a-z0-9][a-z0-9._-]*$");
         static readonly Regex VersionPattern = new(@"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$");
+        static readonly Regex RuntimePattern = new(@"^[a-z][a-z0-9.-]*$");
+        static readonly Regex PlatformPattern = new(@"^[a-z]+-[a-z0-9]+$");
+        static readonly Regex Sha256Pattern = new(@"^[0-9a-fA-F]{64}$");
         static readonly Regex PropertyNamePattern = new(@"^[A-Za-z_][A-Za-z0-9_.:-]*$");
 
         /// <summary>What is wrong with this manifest, empty when nothing is.</summary>
@@ -140,6 +176,33 @@ namespace SW.Serverless.Contract.Catalog
                 problems.Add($"entry '{Entry}' must be a path inside the package.");
             if (!string.IsNullOrEmpty(Icon) && !IsPackagePath(Icon))
                 problems.Add($"icon '{Icon}' must be a path inside the package.");
+            if (!string.IsNullOrEmpty(Runtime) && !RuntimePattern.IsMatch(Runtime))
+                problems.Add($"runtime '{Runtime}' must be a name such as dotnet, exec, python or node.");
+            foreach (var platform in Platforms ?? new List<string>())
+                if (!PlatformPattern.IsMatch(platform ?? ""))
+                    problems.Add($"platform '{platform}' must look like linux-x64 or osx-arm64.");
+            foreach (var (platform, entry) in Entries ?? new Dictionary<string, string>())
+            {
+                if (Platforms == null || !Platforms.Contains(platform))
+                    problems.Add($"entries names platform '{platform}', which platforms doesn't list.");
+                if (!IsPackagePath(entry))
+                    problems.Add($"entries.{platform} '{entry}' must be a path inside the package.");
+            }
+            foreach (var (contract, version) in Contracts ?? new Dictionary<string, int>())
+                if (string.IsNullOrWhiteSpace(contract) || version < 1)
+                    problems.Add($"contract '{contract}' needs a name and a version of 1 or more.");
+            if (Source != null)
+            {
+                if (!IsPackagePath(Source.Path ?? ""))
+                    problems.Add($"source.path '{Source.Path}' must be a folder inside the package.");
+                foreach (var (file, hash) in Source.Files ?? new Dictionary<string, string>())
+                {
+                    if (!IsPackagePath(file))
+                        problems.Add($"source file '{file}' must be a path inside the source folder.");
+                    if (!Sha256Pattern.IsMatch(hash ?? ""))
+                        problems.Add($"source file '{file}' needs its SHA-256 as 64 hex digits.");
+                }
+            }
             if (!string.IsNullOrEmpty(Lifecycle) && Lifecycle is not (ClassicLifecycle or ResidentLifecycle))
                 problems.Add($"lifecycle '{Lifecycle}' must be '{ClassicLifecycle}' or '{ResidentLifecycle}'.");
             if (Protocol != null && Protocol.Min > Protocol.Max)
@@ -186,6 +249,32 @@ namespace SW.Serverless.Contract.Catalog
     {
         public int Min { get; set; }
         public int Max { get; set; }
+
+        /// <summary>Fields written by a newer tool, kept so they are not lost on a round trip.</summary>
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement> Extensions { get; set; }
+    }
+
+    /// <summary>
+    /// The source a package carries, so a published version can be read, compared, audited and
+    /// rebuilt. The files themselves sit in the package under <see cref="Path"/>; hosts don't
+    /// extract them.
+    /// </summary>
+    public class AdapterSource
+    {
+        public const string DefaultPath = "source";
+
+        /// <summary>The folder inside the package that holds the source.</summary>
+        public string Path { get; set; } = DefaultPath;
+
+        /// <summary>Every source file, relative to <see cref="Path"/>, with its SHA-256 in hex.</summary>
+        public Dictionary<string, string> Files { get; set; } = new();
+
+        /// <summary>How the package was built from the source, e.g. "dotnet publish -c Release".</summary>
+        public string BuildCommand { get; set; }
+
+        /// <summary>The lockfiles the build resolved dependencies from, relative to <see cref="Path"/>.</summary>
+        public List<string> Lockfiles { get; set; }
 
         /// <summary>Fields written by a newer tool, kept so they are not lost on a round trip.</summary>
         [JsonExtensionData]

@@ -4,7 +4,7 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 
-namespace SW.Serverless.Installer.Shared
+namespace SW.Serverless.Tooling
 {
     public class PublishRequest
     {
@@ -28,6 +28,19 @@ namespace SW.Serverless.Installer.Shared
         public bool Probe { get; set; } = true;
         public TimeSpan? ProbeTimeout { get; set; }
         public string Kind { get; set; }
+        public string ReleaseNotes { get; set; }
+        public string PublishedBy { get; set; }
+    }
+
+    /// <summary>A package serverless build made — in any language — to publish as it is.</summary>
+    public class PublishPackageRequest
+    {
+        public string PackagePath { get; set; }
+
+        /// <summary>Explicit, or major, minor or patch to bump; the manifest's own version when empty.</summary>
+        public string Version { get; set; }
+
+        public bool Promote { get; set; } = true;
         public string ReleaseNotes { get; set; }
         public string PublishedBy { get; set; }
     }
@@ -142,6 +155,71 @@ namespace SW.Serverless.Installer.Shared
                 await repository.PublishUnversionedAsync(adapterId, zipPath, package);
 
             return new PublishResult { Version = version, Sha256 = sha256, Manifest = manifest, IconDataUri = iconDataUri };
+        }
+
+        /// <summary>
+        /// Publishes a package serverless build made: its manifest is already complete, so this only
+        /// settles the version, stamps it into the manifest and uploads. Always versioned; an adapter
+        /// in another runtime goes only where hosts that can run it look.
+        /// </summary>
+        public static async Task<PublishResult> PublishPackageAsync(ICloudFilesService files, PublishPackageRequest request,
+            Action<string> log = null)
+        {
+            log ??= Console.WriteLine;
+            void Warn(string message) => log($"Warning: {message}");
+
+            if (!File.Exists(request.PackagePath))
+                throw new SWException($"There is no package at {request.PackagePath}.");
+
+            var work = Path.Combine(Path.GetTempPath(), "swsl-publish", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(work);
+            try
+            {
+                var folder = Path.Combine(work, "package");
+                System.IO.Compression.ZipFile.ExtractToDirectory(request.PackagePath, folder);
+                var manifestPath = Path.Combine(folder, AdapterManifest.FileName);
+                if (!File.Exists(manifestPath))
+                    throw new SWException($"{request.PackagePath} has no {AdapterManifest.FileName}; build it with serverless build.");
+
+                var manifest = AdapterManifest.Parse(await File.ReadAllTextAsync(manifestPath));
+                var adapterId = manifest.Id?.ToLowerInvariant();
+                if (!InstallerLogic.IsValidAdapterId(adapterId))
+                    throw new SWException($"The package's manifest has no valid id ('{manifest.Id}').");
+
+                var mode = string.IsNullOrWhiteSpace(request.Version) ? manifest.Version : request.Version;
+                if (string.IsNullOrWhiteSpace(mode))
+                    throw new SWException("The package has no version: give one with -v, or set version in adapter.json.");
+
+                var repository = new AdapterRepository(files, log);
+                var version = await repository.ResolveVersionAsync(adapterId, mode);
+                manifest.Version = version;
+                manifest.PublishedOn = DateTimeOffset.UtcNow;
+                if (!string.IsNullOrWhiteSpace(request.ReleaseNotes)) manifest.ReleaseNotes = request.ReleaseNotes;
+                ManifestBuilder.Validate(manifest);
+                await File.WriteAllTextAsync(manifestPath, manifest.ToJson());
+
+                var zipPath = Path.Combine(work, "adapter.zip");
+                if (!new InstallerLogic().Compress(folder, zipPath))
+                    throw new SWException("The package could not be rebuilt with its version, so nothing was uploaded.");
+
+                var iconDataUri = ManifestBuilder.IconDataUri(manifest, folder, Warn);
+                var package = new PackageInfo
+                {
+                    EntryAssembly = manifest.Entry,
+                    Lifecycle = manifest.Lifecycle,
+                    Kind = string.Join(",", manifest.Kinds),
+                    Manifest = manifest,
+                    IconDataUri = iconDataUri,
+                };
+
+                log($"Publishing version {version} of '{adapterId}' ({manifest.Runtime}).");
+                await repository.PublishVersionAsync(adapterId, version, zipPath, package, request.Promote, request.PublishedBy);
+                return new PublishResult { Version = version, Sha256 = InstallerLogic.Sha256Of(zipPath), Manifest = manifest, IconDataUri = iconDataUri };
+            }
+            finally
+            {
+                try { Directory.Delete(work, true); } catch { }
+            }
         }
     }
 }

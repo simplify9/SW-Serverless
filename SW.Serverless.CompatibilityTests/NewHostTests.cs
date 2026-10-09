@@ -141,6 +141,14 @@ public class OldSdkOnNewHostTests
             Assert.AreEqual(InstanceState.Ready, instance.State);
             Assert.AreEqual("v10:ping", await instance.InvokeAsync<string>("Echo", "ping"));
 
+            // The 10.0.0 SDK knows nothing of the language-neutral Hello fields: they're simply
+            // empty, and nothing depends on them being there.
+            var described = adapters.Describe().Single(h => h.InstanceKey == "compat");
+            Assert.AreEqual("", described.SdkLanguage);
+            Assert.AreEqual(0, described.Settings.Count);
+            Assert.AreEqual(0, described.Kinds.Count);
+            Assert.AreEqual(0, described.Contracts.Count);
+
             await adapters.StopAsync("sdk10.resident", "compat", drain: false);
         }
         finally

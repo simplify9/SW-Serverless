@@ -19,8 +19,18 @@ namespace SW.Serverless.Resident
         /// </summary>
         public string EntryAssemblyPath { get; set; }
 
-        /// <summary>Executable to launch. Defaults to `dotnet`; set for self-contained or non-.NET adapters.</summary>
+        /// <summary>
+        /// Executable to launch, overriding the runtime. Kept for callers that set it before
+        /// runtimes existed; an adapter installed from storage gets its launcher from
+        /// <see cref="Runtime"/> instead.
+        /// </summary>
         public string Executable { get; set; }
+
+        /// <summary>
+        /// The runtime it runs on — dotnet, exec, python, node — as its manifest names it. Filled
+        /// in when the adapter is resolved; empty means dotnet.
+        /// </summary>
+        public string Runtime { get; set; }
 
         /// <summary>
         /// Which warm pool a POOLED rental belongs to. Left null the host derives one from the

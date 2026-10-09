@@ -73,6 +73,17 @@ namespace SW.Serverless.Sdk
 
         async public static Task Run(object commandHandler)
         {
+            // --describe: say what this adapter is, without a host, and exit.
+            if (Describer.Requested(Environment.GetCommandLineArgs()))
+            {
+                await Describer.Print(Describer.Describe(
+                    commandHandler is Func<object> ? null : commandHandler.GetType(),
+                    () => commandHandler is Func<object> factory ? factory() : commandHandler,
+                    Contract.Catalog.AdapterManifest.ClassicLifecycle,
+                    CommandsOf));
+                return;
+            }
+
             Timer idleTimer = null;
 
             try
@@ -80,6 +91,18 @@ namespace SW.Serverless.Sdk
                 Console.InputEncoding = Encoding.UTF8;
                 Console.OutputEncoding = Encoding.UTF8;
                 var commandLineArgs = Environment.GetCommandLineArgs();
+
+                // A host that knows this SDK sends the values on stdin, off the command line where
+                // any process on the machine could read them. Older hosts still pass them as
+                // arguments, which is still understood.
+                if (commandLineArgs.Length > 1 && commandLineArgs[1] == Constants.ValuesOnStdinFlag)
+                    commandLineArgs = new[]
+                    {
+                        commandLineArgs[0],
+                        await Console.In.ReadLineAsync(),
+                        await Console.In.ReadLineAsync(),
+                        await Console.In.ReadLineAsync(),
+                    };
 
                 try
                 {
@@ -245,6 +268,15 @@ namespace SW.Serverless.Sdk
             return type.IsPrimitive;
         }
 
+        /// <summary>The classic commands of a built handler, for --describe.</summary>
+        static IEnumerable<(string, Type, Type, string)> CommandsOf(object built)
+        {
+            if (built == null) yield break;
+            foreach (var (name, info) in BuildMethodsDictionary(built))
+                yield return (name, info.ParameterType, info.Void ? null : Describer.ResultOf(info.MethodInfo),
+                    info.MethodInfo.GetCustomAttribute<AdapterCommandAttribute>()?.Description);
+        }
+
         static Dictionary<string, HandlerMethodInfo> BuildMethodsDictionary(object commandHandler)
         {
             var methodsDictionary = new Dictionary<string, HandlerMethodInfo>(StringComparer.OrdinalIgnoreCase);
@@ -288,6 +320,10 @@ namespace SW.Serverless.Sdk
 
             return methodsDictionary;
         }
+
+        /// <summary>What has been declared with <see cref="Expect(string, bool, bool, string)"/> so far.</summary>
+        internal static IReadOnlyDictionary<string, StartupValue> DeclaredStartupValues =>
+            new Dictionary<string, StartupValue>(expectedStartupValues);
 
         public static void Expect(string name, bool optional = false, bool isPrivate = false, string description = null)
         {

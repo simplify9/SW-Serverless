@@ -8,7 +8,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 
-namespace SW.Serverless.Installer.Shared
+namespace SW.Serverless.Tooling
 {
     /// <summary>What the installer knows about a build, and fills into the manifest over whatever the author wrote.</summary>
     public class GeneratedManifestFields

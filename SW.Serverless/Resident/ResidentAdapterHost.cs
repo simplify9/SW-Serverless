@@ -44,7 +44,8 @@ namespace SW.Serverless.Resident
         readonly IResidentAdapterLocator locator;
 
         public ResidentAdapterHost(ResidentOptions options, IAdapterEventSink sink,
-            IAdapterStateStore stateStore, IResidentAdapterLocator locator, ILoggerFactory loggerFactory)
+            IAdapterStateStore stateStore, IResidentAdapterLocator locator, ILoggerFactory loggerFactory,
+            Runtimes.AdapterRuntimes runtimes = null)
         {
             this.options = options;
             this.sink = sink;
@@ -52,7 +53,7 @@ namespace SW.Serverless.Resident
             this.locator = locator;
             this.loggerFactory = loggerFactory;
             logger = loggerFactory.CreateLogger<ResidentAdapterHost>();
-            launcher = new AdapterProcessLauncher(options, logger);
+            launcher = new AdapterProcessLauncher(options, logger, runtimes ?? new Runtimes.AdapterRuntimes(null));
         }
 
         // ------------------------------------------------------------------ transport
@@ -197,6 +198,7 @@ namespace SW.Serverless.Resident
             var resolved = await locator.ResolveAsync(spec, cancellationToken);
             spec.EntryAssemblyPath = resolved.EntryAssemblyPath;
             spec.Executable = resolved.Executable ?? spec.Executable;
+            spec.Runtime = resolved.Runtime ?? spec.Runtime;
             if (resolved.AdapterValues != null) spec.AdapterValues = resolved.AdapterValues;
 
             var instance = new ResidentAdapterInstance(
@@ -609,6 +611,10 @@ namespace SW.Serverless.Resident
                 Commands = instance.Commands,
                 CommandDetails = instance.CommandDetails,
                 SdkVersion = instance.SdkVersion,
+                SdkLanguage = instance.SdkLanguage,
+                Settings = instance.Settings,
+                Kinds = instance.Kinds,
+                Contracts = instance.Contracts,
                 ProtocolVersion = instance.ProtocolVersion,
                 // Names only. These are connection strings and passwords, and health is what gets
                 // shown on screens and serialised into logs.

@@ -22,6 +22,12 @@
       <ProjectReference Include="..\SW.Serverless.Installer\SW.Serverless.Installer.csproj" />
       <!-- Build order only: these are READ as assemblies, to prove the describer reads a real
            adapter rather than a hand-made fixture. -->
+      <ProjectReference Include="..\SW.Serverless.UnitTests.BitweenHandler\SW.Serverless.UnitTests.BitweenHandler.csproj"
+                        ReferenceOutputAssembly="false" />
+      <ProjectReference Include="..\SW.Serverless.UnitTests.BitweenReceiver\SW.Serverless.UnitTests.BitweenReceiver.csproj"
+                        ReferenceOutputAssembly="false" />
+      <ProjectReference Include="..\SW.Serverless.Compat.ClassicV10\SW.Serverless.Compat.ClassicV10.csproj"
+                        ReferenceOutputAssembly="false" />
       <ProjectReference Include="..\SW.Serverless.Samples.Greedy\SW.Serverless.Samples.Greedy.csproj"
                         ReferenceOutputAssembly="false" />
       <ProjectReference Include="..\SW.Serverless.Samples.Classic\SW.Serverless.Samples.Classic.csproj"

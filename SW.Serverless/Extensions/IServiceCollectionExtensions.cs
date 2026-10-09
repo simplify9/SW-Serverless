@@ -17,8 +17,23 @@ namespace SW.Serverless
             services.AddSingleton(serverlessOptions);
             services.AddTransient<IServerlessService, ServerlessService>();
             services.AddMemoryCache();
+            services.TryAddSingleton(new Runtimes.AdapterRuntimeOptions());
+            services.TryAddSingleton<Runtimes.AdapterRuntimes>();
             services.TryAddSingleton<AdapterInstaller>();
 
+            return services;
+        }
+
+        /// <summary>
+        /// Where the host finds the interpreters adapters run on — python3, node and dotnet on the
+        /// PATH unless set. Call before AddServerless or AddResidentAdapters to take effect.
+        /// </summary>
+        public static IServiceCollection AddAdapterRuntimes(this IServiceCollection services,
+            Action<Runtimes.AdapterRuntimeOptions> configure)
+        {
+            var options = new Runtimes.AdapterRuntimeOptions();
+            configure?.Invoke(options);
+            services.AddSingleton(options);
             return services;
         }
 
@@ -43,6 +58,8 @@ namespace SW.Serverless
             // process, so a cursor saved on one node is invisible to the next one to run the
             // adapter. TryAdd, so a host that registered its own keeps it.
             services.TryAddSingleton<IAdapterStateStore, InMemoryAdapterStateStore>();
+            services.TryAddSingleton(new Runtimes.AdapterRuntimeOptions());
+            services.TryAddSingleton<Runtimes.AdapterRuntimes>();
             services.TryAddSingleton<AdapterInstaller>();
             services.TryAddSingleton<IResidentAdapterLocator, DefaultResidentAdapterLocator>();
             services.AddSingleton<ResidentAdapterHost>();

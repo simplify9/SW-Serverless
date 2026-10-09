@@ -28,6 +28,8 @@
         <ProjectReference Include="..\SW.Serverless\SW.Serverless.csproj" />
         <ProjectReference Include="..\SW.Serverless.Samples.CarrierContract\SW.Serverless.Samples.CarrierContract.csproj" />
         <!-- Build order only: these are packaged and launched as separate processes. -->
+        <ProjectReference Include="..\SW.Serverless.UnitTests.GrpcClassicAdapter\SW.Serverless.UnitTests.GrpcClassicAdapter.csproj"
+                          ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\SW.Serverless.UnitTests.Adapter\SW.Serverless.UnitTests.Adapter.csproj"
                           ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\SW.Serverless.Samples.Ticker\SW.Serverless.Samples.Ticker.csproj"

@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
@@ -34,7 +35,13 @@ namespace SW.Serverless
         private ILogger adapterLogger;
         private readonly ICloudFilesService cloudFilesService;
         private readonly AdapterInstaller installer;
+        private readonly IServiceProvider serviceProvider;
         private IDisposable directoryLease;
+
+        // Set when the adapter speaks the gRPC protocol rather than the classic text one: every
+        // non-.NET adapter, and a .NET one whose manifest opts in. The session then runs on a
+        // resident instance of its own, started here and stopped on dispose.
+        private GrpcSession grpc;
         /// <summary>
         /// Additive overload for hosts that never install adapters from cloud storage — the
         /// StartAsync(adapterId, correlationId, adapterPath, ...) path needs no ICloudFilesService.
@@ -53,7 +60,9 @@ namespace SW.Serverless
             this.memoryCache = memoryCache;
             this.loggerFactory = loggerFactory;
             this.cloudFilesService = cloudFilesService;
-            installer = new AdapterInstaller(serverlessOptions, memoryCache, cloudFilesService);
+            this.serviceProvider = serviceProvider;
+            installer = new AdapterInstaller(serverlessOptions, memoryCache, cloudFilesService,
+                serviceProvider?.GetService<Runtimes.AdapterRuntimes>());
 
             logger = loggerFactory.CreateLogger<ServerlessService>();
 
@@ -73,6 +82,16 @@ namespace SW.Serverless
             }
 
             var adapterMetadata = await Install(adapterId);
+
+            if (adapterMetadata.UsesGrpc)
+            {
+                if (processStarted || grpc != null)
+                    throw new Exception("Already started.");
+                grpc = await GrpcSession.StartAsync(serviceProvider, adapterId, correlationId, startupValues,
+                    adapterMetadata.AdapterValues);
+                return;
+            }
+
             // Held while this process runs, so publishing a newer version can't prune its files.
             directoryLease = AdapterDirectoryLeases.Hold(adapterMetadata.Directory);
 
@@ -116,11 +135,15 @@ namespace SW.Serverless
             var serverlessOptionsBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(serverlessOptions)));
             var adapterValuesBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(adapterMetadata.AdapterValues)));
 
+            // On stdin for an adapter whose SDK reads them there, as arguments for every other.
+            var valuesOnStdin = adapterMetadata.ValuesOnStdin;
             process = new Process
             {
                 StartInfo = new ProcessStartInfo("dotnet")
                 {
-                    Arguments = $"\"{adapterMetadata.LocalPath}\" {serverlessOptionsBase64} {startupValuesBase64} {adapterValuesBase64}",
+                    Arguments = valuesOnStdin
+                        ? $"\"{adapterMetadata.LocalPath}\" {Constants.ValuesOnStdinFlag}"
+                        : $"\"{adapterMetadata.LocalPath}\" {serverlessOptionsBase64} {startupValuesBase64} {adapterValuesBase64}",
                     WorkingDirectory = Path.GetDirectoryName(adapterMetadata.LocalPath),
                     UseShellExecute = false,
 
@@ -145,16 +168,30 @@ namespace SW.Serverless
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
+            if (valuesOnStdin)
+            {
+                process.StandardInput.WriteLine(serverlessOptionsBase64);
+                process.StandardInput.WriteLine(startupValuesBase64);
+                process.StandardInput.WriteLine(adapterValuesBase64);
+                process.StandardInput.Flush();
+            }
+
             return Task.CompletedTask;
         }
 
         public Task<IDictionary<string, StartupValue>> GetExpectedStartupValues()
         {
+            if (grpc != null) return Task.FromResult(grpc.ExpectedStartupValues());
             return InvokeAsync<IDictionary<string, StartupValue>>(Constants.ExpectedCommand, null);
         }
 
         async public Task InvokeAsync(string command, object input, int commandTimeout = 0)
         {
+            if (grpc != null)
+            {
+                await grpc.InvokeAsync(command, input, commandTimeout == 0 ? serverlessOptions.CommandTimeout : commandTimeout);
+                return;
+            }
             await InvokeAsync<NoT>(command, input, commandTimeout);
         }
 
@@ -166,6 +203,9 @@ namespace SW.Serverless
             {
                 throw new ArgumentException("Invalid name.", nameof(command));
             }
+
+            if (grpc != null)
+                return await grpc.InvokeAsync<TResult>(command, input, commandTimeout);
 
             if (!processStarted || process.HasExited || timedOut)
                 throw new Exception("Process not started or terminated.");
@@ -318,12 +358,45 @@ namespace SW.Serverless
                 EntryAssembly = installed.EntryAssembly,
                 LocalPath = installed.LocalPath,
                 Directory = installed.Directory,
-                AdapterValues = installed.AdapterValues
+                AdapterValues = installed.AdapterValues,
+                UsesGrpc = UsesGrpc(installed),
+                ValuesOnStdin = ReadsValuesOnStdin(installed)
             };
         }
 
+        /// <summary>
+        /// Whether a classic call to this adapter goes over gRPC: always for a runtime other than
+        /// .NET, whose SDKs speak only that, and for a .NET adapter whose manifest opts in with a
+        /// protocol of 2 or more. Every other .NET adapter keeps the text protocol it was built for.
+        /// </summary>
+        /// <summary>
+        /// Whether the adapter's SDK reads its values from stdin: known only from the SDK version
+        /// its manifest records. A package without one is from before, and gets them as arguments.
+        /// </summary>
+        internal static bool ReadsValuesOnStdin(InstalledAdapter installed) =>
+            Version.TryParse((installed.Manifest?.SdkVersion ?? "").Split('-', '+')[0], out var sdk) &&
+            sdk >= Version.Parse(Constants.ValuesOnStdinSince);
+
+        internal static bool UsesGrpc(InstalledAdapter installed) =>
+            !string.Equals(installed.Runtime, Contract.Catalog.AdapterManifest.DotnetRuntime, StringComparison.OrdinalIgnoreCase) ||
+            installed.Manifest?.Protocol is { Min: >= 2 };
+
         public void Dispose()
         {
+            if (grpc != null)
+            {
+                try
+                {
+                    grpc.StopAsync().GetAwaiter().GetResult();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Service did not dispose properly.");
+                }
+                grpc = null;
+                return;
+            }
+
             try
             {
                 if (processStarted)
@@ -363,6 +436,75 @@ namespace SW.Serverless
             public string LocalPath { get; set; }
             public string Directory { get; set; }
             public IDictionary<string, string> AdapterValues { get; set; } = new Dictionary<string, string>();
+            public bool UsesGrpc { get; set; }
+            public bool ValuesOnStdin { get; set; }
+        }
+
+        /// <summary>
+        /// A classic session over gRPC: a resident instance under a key of its own, started for
+        /// the session and stopped when it ends, called one command at a time as the text protocol
+        /// is. The resident host does the launching, handshake, timeouts and logs.
+        /// </summary>
+        private sealed class GrpcSession
+        {
+            readonly Resident.IResidentAdapterHost host;
+            readonly string adapterId;
+            readonly string instanceKey;
+            readonly Resident.ResidentAdapterInstance instance;
+
+            GrpcSession(Resident.IResidentAdapterHost host, string adapterId, string instanceKey,
+                Resident.ResidentAdapterInstance instance)
+            {
+                this.host = host;
+                this.adapterId = adapterId;
+                this.instanceKey = instanceKey;
+                this.instance = instance;
+            }
+
+            public static async Task<GrpcSession> StartAsync(IServiceProvider services, string adapterId,
+                string correlationId, IDictionary<string, string> startupValues, IDictionary<string, string> adapterValues)
+            {
+                var host = services?.GetService<Resident.IResidentAdapterHost>()
+                           ?? throw new InvalidOperationException(
+                               $"Adapter '{adapterId}' speaks the gRPC protocol, which runs on the resident adapter host. " +
+                               "Register it with AddResidentAdapters.");
+
+                var values = startupValues == null
+                    ? new Dictionary<string, string>()
+                    : new Dictionary<string, string>(startupValues);
+                values[Constants.CorrelationIdName] = correlationId;
+
+                var instanceKey = $"classic-{Guid.NewGuid():N}";
+                var instance = await host.StartExclusiveAsync(new Resident.AdapterSpec
+                {
+                    AdapterId = adapterId,
+                    InstanceKey = instanceKey,
+                    StartupValues = values,
+                    AdapterValues = adapterValues ?? new Dictionary<string, string>(),
+                });
+                return new GrpcSession(host, adapterId, instanceKey, instance);
+            }
+
+            public Task<TResult> InvokeAsync<TResult>(string command, object input, int timeoutSeconds) =>
+                instance.InvokeAsync<TResult>(command, input, timeoutSeconds);
+
+            public Task InvokeAsync(string command, object input, int timeoutSeconds) =>
+                instance.InvokeAsync<object>(command, input, timeoutSeconds);
+
+            /// <summary>The settings it declared in its handshake, as the classic protocol has always described them.</summary>
+            public IDictionary<string, StartupValue> ExpectedStartupValues() =>
+                instance.Settings.ToDictionary(
+                    s => s.Name,
+                    s => new StartupValue
+                    {
+                        Optional = !s.Required,
+                        Default = string.IsNullOrEmpty(s.DefaultValue) ? null : s.DefaultValue,
+                        Type = s.Type,
+                        Private = s.Secret,
+                        Description = s.Description,
+                    });
+
+            public Task StopAsync() => host.StopAsync(adapterId, instanceKey, drain: false);
         }
     }
 }
