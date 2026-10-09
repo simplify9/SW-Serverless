@@ -36,6 +36,8 @@ sw.run(Greeter);
   and `reset(sessionId)`. `sw.context()` publishes events, keeps small state and records metrics;
   its `signal` aborts when the host gives up on a call.
 - **Logs** go to the host with `sw.log.info(...)` and the other levels.
-- `node main.js --describe` prints what the adapter is; `serverless build` writes it into the manifest.
+- `node main.js --describe` prints what the adapter is; `sw-serverless build` writes it into the manifest.
 
-For Bitween adapters, `@simplyworks/bitween` has the four kinds ready to extend. Tests: `npm test`.
+An application with a contract of its own declares it on the adapter class with `static kinds` and
+`static contracts` (`{ orders: 1 }`), and can give its adapter authors base classes that do it for them.
+`sw-serverless init --lang node` (or `typescript`) starts an adapter. Tests: `npm test`.

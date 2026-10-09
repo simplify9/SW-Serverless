@@ -36,10 +36,11 @@ if __name__ == "__main__":
   `sw.context()` publishes events (`await ctx.publish(...)`), keeps small state
   (`get_state`/`set_state`/`delete_state`) and records metrics.
 - **Logging** through Python's `logging` reaches the host.
-- `python main.py --describe` prints what the adapter is; `serverless build` writes it into the
+- `python main.py --describe` prints what the adapter is; `sw-serverless build` writes it into the
   manifest.
 
-For Bitween adapters, `simplyworks-bitween` has the four kinds — `Handler`, `Mapper`, `Validator`,
-`Receiver` — ready to subclass. `serverless init --lang python --kind handler` starts one.
+An application with a contract of its own declares it with `@sw.implements("orders", 1, "processor")`
+on the adapter class, and can give its adapter authors base classes that do it for them.
+`sw-serverless init --lang python` starts an adapter.
 
 Tests: `PYTHONPATH=src python -m unittest discover -s tests`.
