@@ -17,7 +17,7 @@
         <!-- 4.x: 3.x pulled in a vulnerable SSH.NET version, and did not follow the docker CLI context
              (Colima, Rancher), so the broker tests skipped on machines that had Docker. -->
         <PackageReference Include="Testcontainers.RabbitMq" Version="4.15.0" />
-        <PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
+        <PackageReference Include="RabbitMQ.Client" Version="7.2.2" />
         <PackageReference Include="SimplyWorks.CloudFiles.LocalTests" Version="10.0.0" />
         <PackageReference Include="SimplyWorks.CloudFiles.LocalTests.Extensions" Version="10.0.0" />
 
