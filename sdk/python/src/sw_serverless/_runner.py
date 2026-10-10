@@ -19,7 +19,7 @@ import traceback
 from . import _adapter, _types, _wire
 from ._http2 import GrpcStream
 
-SDK_VERSION = "10.2.0"
+SDK_VERSION = "10.2.1"
 SDK_LANGUAGE = "python"
 PROTOCOL = 2
 ATTACH = "/sw.serverless.v1.AdapterHost/Attach"

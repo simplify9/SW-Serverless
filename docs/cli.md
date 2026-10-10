@@ -175,7 +175,7 @@ checks:
 
 ```
 PASS manifest
-PASS describe — python SDK 10.2.0, 2 commands
+PASS describe — python SDK 10.2.1, 2 commands
 PASS settings match the manifest — 2 settings
 PASS starts — classic session
 SKIP contracts — it declares no contract, so only what every adapter must do is checked

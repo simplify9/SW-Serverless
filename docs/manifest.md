@@ -72,7 +72,7 @@ What the build writes into the package (abridged), given an adapter that declare
   },
   "lifecycle": "classic",
   "protocol": { "min": 2, "max": 2 },
-  "sdkVersion": "10.2.0",
+  "sdkVersion": "10.2.1",
   "compatibility": { "minHostVersion": "10.1.0", "applications": { "orders-app": "3.2.0" } },
   "properties": [
     { "name": "Endpoint", "displayName": "API URL", "description": "Where orders go.", "type": "text", "required": true, "secret": false, "group": "Connection" },
