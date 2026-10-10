@@ -29,6 +29,12 @@ namespace SW.Serverless.Tooling.Conformance
         /// <summary>Where the host finds python3, node and dotnet.</summary>
         public Runtimes.AdapterRuntimeOptions Runtimes { get; set; } = new();
 
+        /// <summary>
+        /// Memory and CPU ceilings to run the adapter under while it is checked; null (the default)
+        /// for none. A call that crosses one fails its check with the limit named.
+        /// </summary>
+        public LocalAdapterLimits Limits { get; set; }
+
         /// <summary>Progress, one line at a time.</summary>
         public Action<string> Log { get; set; } = _ => { };
     }

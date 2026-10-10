@@ -1,6 +1,6 @@
 {
   "name": "@simplyworks/sw-serverless",
-  "version": "10.2.0",
+  "version": "10.2.2",
   "description": "Write SW-Serverless adapters in JavaScript or TypeScript: settings, commands, and the host protocol, with no dependencies.",
   "main": "src/index.js",
   "types": "src/index.d.ts",

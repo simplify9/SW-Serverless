@@ -19,12 +19,16 @@ import traceback
 from . import _adapter, _types, _wire
 from ._http2 import GrpcStream
 
-SDK_VERSION = "10.2.0"
+SDK_VERSION = "10.2.2"
 SDK_LANGUAGE = "python"
 PROTOCOL = 2
 ATTACH = "/sw.serverless.v1.AdapterHost/Attach"
 DESCRIBE_FLAG = "--describe"
 DESCRIBE_VERSION = 1
+MEMORY_LIMIT_VARIABLE = "SW_SERVERLESS_MEMORY_LIMIT_BYTES"
+
+# The memory ceiling this process runs under once apply_memory_limit has set it; None otherwise.
+_memory_limit = None
 
 # ILogger levels, which the host's log pipeline reads: Trace 0 .. Critical 5.
 _LEVELS = ((logging.CRITICAL, 5), (logging.ERROR, 4), (logging.WARNING, 3), (logging.INFO, 2), (logging.DEBUG, 1))
@@ -314,6 +318,12 @@ class Runner:
             await self.send({"id": frame_id, "invoke_result": {"payload": payload}})
         except asyncio.CancelledError:
             await self._fail(frame_id, "OperationCanceledException", "the call was cancelled", "")
+        except MemoryError as ex:
+            message = str(ex)
+            if _memory_limit:
+                message = (f"the adapter ran out of memory: it runs under a memory limit of "
+                           f"{_memory_limit // (1024 * 1024)} MB" + (f" ({message})" if message else ""))
+            await self._fail(frame_id, _qualified(type(ex)), message, traceback.format_exc())
         except Exception as ex:
             await self._fail(frame_id, getattr(ex, "type", None) or _qualified(type(ex)), str(ex),
                              getattr(ex, "detail", None) or traceback.format_exc())
@@ -479,6 +489,46 @@ def describe(adapter):
     }
 
 
+def apply_memory_limit(environ=None, platform=None, resource_module=None):
+    """Applies the memory ceiling the host hands a Python adapter in SW_SERVERLESS_MEMORY_LIMIT_BYTES.
+
+    Python has no heap ceiling of its own, so on Linux it becomes RLIMIT_DATA, soft and hard: an
+    allocation past it raises MemoryError inside the adapter rather than growing until the host's
+    watchdog or the kernel kills it. RLIMIT_DATA rather than RLIMIT_AS: address space counts what
+    is only reserved — 64 MB per malloc arena, a stack per thread — so a few worker threads put an
+    adapter using 30 MB at over 600 MB of it. Elsewhere (macOS, Windows) nothing is set, and the
+    host's watchdog is the ceiling. With no variable, nothing is ever set.
+
+    Returns the ceiling applied in bytes, or None.
+    """
+    global _memory_limit
+    environ = os.environ if environ is None else environ
+    platform = sys.platform if platform is None else platform
+    raw = (environ.get(MEMORY_LIMIT_VARIABLE) or "").strip()
+    if not raw:
+        return None
+    try:
+        limit = int(raw)
+    except ValueError:
+        print(f"{MEMORY_LIMIT_VARIABLE}={raw!r} is not a number of bytes; no memory limit applied", file=sys.stderr)
+        return None
+    if limit <= 0 or not platform.startswith("linux"):
+        return None
+    try:
+        if resource_module is None:
+            import resource as resource_module
+        _, hard = resource_module.getrlimit(resource_module.RLIMIT_DATA)
+        # A process can lower its hard limit but not raise it.
+        if hard != resource_module.RLIM_INFINITY and 0 <= hard < limit:
+            limit = hard
+        resource_module.setrlimit(resource_module.RLIMIT_DATA, (limit, limit))
+    except Exception as ex:
+        print(f"the memory limit of {limit} bytes could not be applied: {ex}", file=sys.stderr)
+        return None
+    _memory_limit = limit
+    return limit
+
+
 def _check_kinds(adapter):
     check = getattr(adapter, "__sw_check__", None)
     if callable(check):
@@ -495,6 +545,7 @@ def run(adapter):
         sys.stdout.flush()
         return
 
+    apply_memory_limit()
     instance = adapter() if isinstance(adapter, type) else adapter
     _check_kinds(instance)
 

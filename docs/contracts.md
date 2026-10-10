@@ -259,7 +259,7 @@ For the orders processor above:
 
 ```
 PASS manifest
-PASS describe — python SDK 10.2.0, 1 commands
+PASS describe — python SDK 10.2.2, 1 commands
 PASS settings match the manifest — 1 settings
 PASS starts — classic session
 PASS orders processor: methods — Process

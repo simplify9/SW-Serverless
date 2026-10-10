@@ -78,7 +78,7 @@ namespace SW.Serverless.Tooling.Conformance
             try
             {
                 session = await LocalAdapterHost.StartAsync(options.PackageDirectory, options.Settings, options.Runtimes,
-                    options.CommandTimeoutSeconds, work);
+                    options.CommandTimeoutSeconds, work, options.Limits);
                 report.Pass("starts", manifest.IsResident ? "resident, attached over gRPC" : "classic session");
             }
             catch (Exception ex)
@@ -300,6 +300,12 @@ namespace SW.Serverless.Tooling.Conformance
                 catch (TimeoutException)
                 {
                     report.Fail("an unknown command is refused", "it didn't answer a command it doesn't have");
+                    return;
+                }
+                catch (SW.Serverless.Resident.AdapterStoppedException ex)
+                {
+                    // Not a refusal: it was stopped — at a memory or CPU limit, say — and answers nothing now.
+                    report.Fail("an unknown command is refused", ex.Message);
                     return;
                 }
                 catch (Exception) when (attempt == 1)

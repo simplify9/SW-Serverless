@@ -48,10 +48,10 @@ namespace SW.Serverless.Tooling.Scaffolding
         public const string SdkPackageVersion = "10.1.0";
 
         /// <summary>The Python SDK the templates name; the build vendors the copy it carries.</summary>
-        public const string PythonSdkVersion = "10.2.0";
+        public const string PythonSdkVersion = "10.2.2";
 
         /// <summary>The Node SDK the templates name; the build vendors the copy it carries.</summary>
-        public const string NodeSdkVersion = "10.2.0";
+        public const string NodeSdkVersion = "10.2.2";
 
         public static readonly IReadOnlyList<string> Languages = new[] { "dotnet", "python", "node", "typescript" };
 
