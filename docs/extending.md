@@ -267,7 +267,7 @@ var report = await new ConformanceRunner().RunAsync(new ConformanceOptions
 
 ### Limits on what runs locally
 
-A tool that builds and tries adapters on a shared server can cap them (10.2.1 and later). Pass
+A tool that builds and tries adapters on a shared server can cap them (10.2.2 and later). Pass
 `LocalAdapterLimits` to `LocalAdapterHost.StartAsync` (`limits:`) or set
 `ConformanceOptions.Limits`; leave it null, the default, for no limits.
 

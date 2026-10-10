@@ -271,7 +271,7 @@ with standard input closed, and give up after 30 seconds.
 {
   "describeVersion": 1,
   "sdkLanguage": "python",
-  "sdkVersion": "10.2.1",
+  "sdkVersion": "10.2.2",
   "lifecycle": "classic",
   "protocol": { "min": 2, "max": 2 },
   "settings": [

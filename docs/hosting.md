@@ -420,7 +420,7 @@ Notes:
 - The CPU figure is a share of the whole machine. On a 16-core machine one busy core is about 6%.
 - The hard memory limit is also given to the runtime: `DOTNET_GCHeapHardLimit` for .NET and
   `--max-old-space-size` for Node, so an allocation past it fails inside the adapter. Python has no
-  such setting; the host passes it as `SW_SERVERLESS_MEMORY_LIMIT_BYTES`, and from SDK 10.2.1 the
+  such setting; the host passes it as `SW_SERVERLESS_MEMORY_LIMIT_BYTES`, and from SDK 10.2.2 the
   Python SDK sets it as `RLIMIT_DATA` on Linux, so an allocation past it raises `MemoryError`.
   Elsewhere (macOS, Windows), and for older SDKs, only the host's kill applies. Without a hard
   limit the variable is not set.

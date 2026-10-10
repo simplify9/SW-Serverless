@@ -26,7 +26,7 @@ const readline = require("node:readline");
 const { AsyncLocalStorage } = require("node:async_hooks");
 const wire = require("./wire");
 
-const SDK_VERSION = "10.2.1";
+const SDK_VERSION = "10.2.2";
 const SDK_LANGUAGE = "node";
 const PROTOCOL = 2;
 const ATTACH = "/sw.serverless.v1.AdapterHost/Attach";

@@ -20,7 +20,7 @@ file formats are versioned so that it stays that way.
 |---|---|---|
 | Host, `SimplyWorks.Serverless` | 10.x | `HostInfo.Version` is the host's version, compared with an adapter's `minHostVersion`. |
 | .NET SDK, `SimplyWorks.Serverless.Sdk` | 10.x | 10.1.0 added `--describe` (needed by `sw-serverless build`) and reading settings from standard input. |
-| Python SDK `sw-serverless`, Node SDK `@simplyworks/sw-serverless` | 10.2.1 | Copied into each package by `sw-serverless build`. |
+| Python SDK `sw-serverless`, Node SDK `@simplyworks/sw-serverless` | 10.2.2 | Copied into each package by `sw-serverless build`. |
 | Protocol | 1 and 2 | 1 is the .NET classic text protocol; 2 is gRPC. Hosts speak 2 to 2. |
 | Manifest (`adapter.json`) | `manifestVersion` 1 | |
 | Catalog entry | `catalogVersion` 1 | |

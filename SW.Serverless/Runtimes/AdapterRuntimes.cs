@@ -214,7 +214,7 @@ namespace SW.Serverless.Runtimes
                 foreach (var argument in launch.Arguments) psi.ArgumentList.Add(argument);
                 psi.Environment["PYTHONUNBUFFERED"] = "1";
                 psi.Environment["PYTHONDONTWRITEBYTECODE"] = "1";
-                // Python has no heap ceiling of its own. The SDK (10.2.1 and later) reads this one
+                // Python has no heap ceiling of its own. The SDK (10.2.2 and later) reads this one
                 // and, on Linux, sets RLIMIT_DATA to it, so an allocation past it raises MemoryError
                 // inside the adapter; the watchdog and, where the container allows them, cgroups
                 // hold it everywhere else. Never inherited from the host: no limit means none.
