@@ -1,0 +1,77 @@
+name: SDK release
+
+# A tag sdk-v<version> (sdk-v10.2.0) publishes the Python SDK to PyPI as sw-serverless and the
+# Node SDK to npm as @simplyworks/sw-serverless, at that version. Each is tested first, and a
+# version already on its registry is left alone, so a failed run can simply be run again.
+on:
+  push:
+    tags: ["sdk-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, e.g. 10.2.0"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Version
+        id: version
+        run: |
+          v="${{ github.event.inputs.version }}"
+          [ -z "$v" ] && v="${GITHUB_REF_NAME#sdk-v}"
+          sed -i -E "s/^version = \".*\"/version = \"$v\"/" pyproject.toml
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+      - name: Test
+        run: PYTHONPATH=src python -m unittest discover -s tests
+      - name: Build
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk/python/dist
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+
+  node:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Version
+        id: version
+        run: |
+          v="${{ github.event.inputs.version }}"
+          [ -z "$v" ] && v="${GITHUB_REF_NAME#sdk-v}"
+          npm version "$v" --no-git-tag-version --allow-same-version
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+      - name: Test
+        run: node --test
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          name=$(node -p "require('./package.json').name")
+          if npm view "$name@${{ steps.version.outputs.value }}" version >/dev/null 2>&1; then
+            echo "$name@${{ steps.version.outputs.value }} is already on npm."
+          else
+            npm publish --access public
+          fi
