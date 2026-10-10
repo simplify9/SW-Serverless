@@ -262,8 +262,38 @@ var report = await new ConformanceRunner().RunAsync(new ConformanceOptions
 });
 ```
 
-`ConformanceOptions` also takes `Contracts` (used before registered ones), `WorkDirectory` and
-`Runtimes`.
+`ConformanceOptions` also takes `Contracts` (used before registered ones), `WorkDirectory`,
+`Runtimes` and `Limits`.
+
+### Limits on what runs locally
+
+A tool that builds and tries adapters on a shared server can cap them (10.2.1 and later). Pass
+`LocalAdapterLimits` to `LocalAdapterHost.StartAsync` (`limits:`) or set
+`ConformanceOptions.Limits`; leave it null, the default, for no limits.
+
+```csharp
+await using var adapter = await LocalAdapterHost.StartAsync(packageDirectory, settings,
+    limits: new LocalAdapterLimits
+    {
+        MemoryLimitBytes = 256L * 1024 * 1024,              // hard: the process is killed above it
+        CpuPercentLimit = 100.0 / Environment.ProcessorCount, // one core, as a share of the machine
+    });
+```
+
+| Property | Default | Meaning |
+|---|---|---|
+| `MemoryLimitBytes` | `0` (none) | The host's hard memory limit. Also given to the runtime (see [Hosting](hosting.md#limits-and-supervision)), so on .NET, Node and Python on Linux an allocation past it usually fails inside the adapter first. |
+| `CpuPercentLimit` | `0` (none) | Sustained CPU as a share of the whole machine. Over it for `CpuLimitSamples` samples in a row, the adapter is asked to stop, and killed if it hasn't within two samples (at least 2 seconds). |
+| `CpuLimitSamples` | `3` | Samples in a row over `CpuPercentLimit` before it trips. |
+| `SampleInterval` | 1 second | How often the process is sampled: the host's heartbeat. The missed heartbeats allowed grow to keep the default host's 45 seconds of tolerance. |
+
+A call the adapter is running when it crosses a limit fails saying so, never with a bare closed
+stream: an `AdapterStoppedException` (`LimitExceeded` is true), such as
+`Adapter 'acme.orders/0.0.0' stopped: it was using 167 MB, over its memory limit of 150 MB, and
+was killed.`, or the adapter's own out-of-memory error, such as
+`MemoryError: the adapter ran out of memory: it runs under a memory limit of 150 MB`. Limits reach
+every adapter the resident host runs, which is all of them except a .NET adapter on the protocol 1
+text protocol.
 
 ## Publishing: PackagePublisher and AdapterRepository
 

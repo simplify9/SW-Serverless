@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -40,14 +41,28 @@ namespace SW.Serverless.Tooling
             this.ownsWork = ownsWork;
         }
 
+        /// <summary>As the overload with limits, with none: kept so code built against 10.2.0 still binds.</summary>
+        public static Task<LocalAdapterHost> StartAsync(string packageDirectory, IDictionary<string, string> settings,
+            AdapterRuntimeOptions runtimes, int commandTimeoutSeconds, string workDirectory) =>
+            StartAsync(packageDirectory, settings, runtimes, commandTimeoutSeconds, workDirectory, limits: null);
+
+        /// <summary>
+        /// Installs the package in a temporary store and starts it. With <paramref name="limits"/>, the
+        /// adapter runs under those memory and CPU ceilings, sampled every
+        /// <see cref="LocalAdapterLimits.SampleInterval"/>; a call it is running when it crosses one
+        /// fails with an <see cref="AdapterStoppedException"/> naming the limit. Without, it runs as
+        /// a host runs it by default, unconstrained.
+        /// </summary>
         public static async Task<LocalAdapterHost> StartAsync(string packageDirectory, IDictionary<string, string> settings,
-            AdapterRuntimeOptions runtimes = null, int commandTimeoutSeconds = 60, string workDirectory = null)
+            AdapterRuntimeOptions runtimes = null, int commandTimeoutSeconds = 60, string workDirectory = null,
+            LocalAdapterLimits limits = null)
         {
+            if (limits is { IsEmpty: true }) limits = null;
             var manifest = AdapterManifest.Parse(File.ReadAllText(Path.Combine(packageDirectory, AdapterManifest.FileName)));
             var work = workDirectory ?? Path.Combine(Path.GetTempPath(), "swsl-local", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(work);
 
-            var host = Build(runtimes ?? new AdapterRuntimeOptions(), commandTimeoutSeconds, work);
+            var host = Build(runtimes ?? new AdapterRuntimeOptions(), commandTimeoutSeconds, work, limits);
             await host.StartAsync();
             try
             {
@@ -59,7 +74,14 @@ namespace SW.Serverless.Tooling
                 ISession session = manifest.IsResident
                     ? await ResidentSession.StartAsync(host.Services, adapterRef, settings, commandTimeoutSeconds)
                     : await ClassicSession.StartAsync(host.Services, adapterRef, settings, commandTimeoutSeconds);
-                return new LocalAdapterHost(host, session, work, workDirectory == null);
+                return new LocalAdapterHost(host, session, work, workDirectory == null)
+                {
+                    limits = limits,
+                    adapterId = adapterRef,
+                    // The process the calls go to, when the resident host runs it: every adapter but
+                    // a .NET one on the classic text protocol, which no limit reaches.
+                    instance = host.Services.GetRequiredService<IResidentAdapterHost>().List().FirstOrDefault(),
+                };
             }
             catch
             {
@@ -70,11 +92,87 @@ namespace SW.Serverless.Tooling
             }
         }
 
+        LocalAdapterLimits limits;
+        string adapterId;
+        ResidentAdapterInstance instance;
+
         /// <summary>Calls a command and returns its answer as text: raw for a string, JSON for anything else.</summary>
-        public Task<string> CallAsync(string command, object input) => session.CallAsync(command, input);
+        public async Task<string> CallAsync(string command, object input)
+        {
+            try
+            {
+                return await session.CallAsync(command, input);
+            }
+            catch (Exception ex) when (limits != null)
+            {
+                var explained = await ExplainAsync(ex);
+                if (explained == null) throw;
+                throw explained;
+            }
+        }
 
         /// <summary>Calls a command that answers nothing.</summary>
-        public Task CallVoidAsync(string command, object input) => session.CallVoidAsync(command, input);
+        public async Task CallVoidAsync(string command, object input)
+        {
+            try
+            {
+                await session.CallVoidAsync(command, input);
+            }
+            catch (Exception ex) when (limits != null)
+            {
+                var explained = await ExplainAsync(ex);
+                if (explained == null) throw;
+                throw explained;
+            }
+        }
+
+        static readonly string[] OutOfMemorySigns =
+        {
+            "heap out of memory", "Reached heap limit", "MemoryError", "OutOfMemoryException", "Cannot allocate memory",
+        };
+
+        /// <summary>
+        /// A failure that a limit explains, said in those terms; null to let it through as it is.
+        /// The host's own stops already say which limit, and a runtime's own ceiling raises inside
+        /// the adapter — but an adapter that died at its runtime's ceiling (Node's heap) only closed
+        /// its stream, which reads as nothing in particular.
+        /// </summary>
+        async Task<Exception> ExplainAsync(Exception ex)
+        {
+            if (ex is AdapterStoppedException || limits.MemoryLimitBytes <= 0) return null;
+            var limit = $"{limits.MemoryLimitBytes / 1024 / 1024} MB";
+
+            if (ex is AdapterInvocationException invocation)
+            {
+                var outOfMemory = (invocation.AdapterExceptionType ?? "").Contains("OutOfMemory") ||
+                                  (invocation.AdapterExceptionType ?? "").EndsWith("MemoryError");
+                if (!outOfMemory || invocation.Message.Contains("memory limit")) return null;
+                var message = invocation.Message[(invocation.AdapterExceptionType.Length + 2)..];
+                return new AdapterInvocationException(invocation.AdapterExceptionType,
+                    $"the adapter ran out of memory: it runs under a memory limit of {limit}" +
+                    (string.IsNullOrWhiteSpace(message) ? "" : $" ({message})"), invocation.Detail);
+            }
+
+            if (ex is not IOException || instance?.Process == null) return null;
+
+            // Its last words are on stderr, read as they come: wait for the process to be gone.
+            try
+            {
+                using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                await instance.Process.WaitForExitAsync(wait.Token);
+            }
+            catch { /* still running, or already disposed */ }
+
+            if (instance.StopReason != null)
+                return new AdapterStoppedException(adapterId, instance.StopReason, instance.StoppedForLimit);
+            var sign = instance.Diagnostics.Select(line => OutOfMemorySigns.FirstOrDefault(s =>
+                    line.Contains(s, StringComparison.OrdinalIgnoreCase)))
+                .FirstOrDefault(s => s != null);
+            return sign == null
+                ? null
+                : new AdapterStoppedException(adapterId,
+                    $"it ran out of memory under its memory limit of {limit} and exited ({sign})", limitExceeded: true);
+        }
 
         public async ValueTask DisposeAsync()
         {
@@ -84,7 +182,10 @@ namespace SW.Serverless.Tooling
             if (ownsWork) try { Directory.Delete(work, true); } catch { }
         }
 
-        static IHost Build(AdapterRuntimeOptions runtimes, int commandTimeoutSeconds, string work)
+        /// <summary>The default host tolerates 45 seconds of missed heartbeats; sampling faster keeps that.</summary>
+        static readonly TimeSpan HeartbeatTolerance = TimeSpan.FromSeconds(45);
+
+        static IHost Build(AdapterRuntimeOptions runtimes, int commandTimeoutSeconds, string work, LocalAdapterLimits limits)
         {
             var tag = Guid.NewGuid().ToString("N")[..10];
             return Host.CreateDefaultBuilder()
@@ -116,6 +217,21 @@ namespace SW.Serverless.Tooling
                         o.SocketPath = Path.Combine("/tmp", $"swsl-local-{tag}.sock");
                         o.PipeName = $"swsl-local-{tag}";
                         o.HandshakeTimeout = TimeSpan.FromSeconds(60);
+                        if (limits == null) return;
+
+                        // Sampled on the heartbeat, so the heartbeat is the sample interval: at the
+                        // default 15 seconds a short try finishes between two samples. The ping waits
+                        // as long as the interval, so the misses allowed grow with it and an adapter
+                        // busy in one long call is given the 45 seconds it always was.
+                        var interval = limits.SampleInterval > TimeSpan.FromMilliseconds(250)
+                            ? limits.SampleInterval : TimeSpan.FromMilliseconds(250);
+                        o.HeartbeatInterval = interval;
+                        o.MissedHeartbeatsBeforeRestart = Math.Max(3, (int)Math.Ceiling(HeartbeatTolerance / interval));
+                        o.HardMemoryLimitBytes = Math.Max(0, limits.MemoryLimitBytes);
+                        o.CpuPercentLimit = Math.Max(0, limits.CpuPercentLimit);
+                        o.CpuLimitSamples = Math.Max(1, limits.CpuLimitSamples);
+                        // Asked to stop at the CPU ceiling, an adapter in a runaway loop never will.
+                        o.DrainDeadline = interval * 2 > TimeSpan.FromSeconds(2) ? interval * 2 : TimeSpan.FromSeconds(2);
                     });
                 })
                 .Build();
