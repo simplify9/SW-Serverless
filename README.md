@@ -40,14 +40,14 @@ multi-node scheduler: adapters run on the machine that runs the host.
 | Tooling | NuGet `SimplyWorks.Serverless.Tooling` (`SW.Serverless.Tooling`) | What the CLI does, as a library: build, conformance tests, scaffolding, publishing. For an application that builds its own tools. |
 | CLI | `sw-serverless` (project `SW.Serverless.Installer`) | `init`, `build`, `test`, `run`, `manifest validate`, `publish`, `promote`, `versions`, `withdraw`. |
 
-The Python and Node SDKs are not on PyPI or npm yet. You do not need them there:
-`sw-serverless build` copies the SDK into every Python and Node package it builds. They will be
-published to PyPI and npm later.
+The Python and Node SDKs are published to PyPI (`sw-serverless`) and npm (`@simplyworks/sw-serverless`)
+with each release, at the packages' version. You do not need them from there: `sw-serverless build`
+copies the SDK into every Python and Node package it builds.
 
 ## Install the CLI
 
 Self-contained binaries are published on the
-[GitHub releases](https://github.com/simplify9/SW-Serverless/releases) tagged `cli-v<version>`, one
+[GitHub releases](https://github.com/simplify9/SW-Serverless/releases) as `cli-v<version>`, released with each version of the packages, one
 per platform: `sw-serverless-<rid>.tar.gz` for `linux-x64`, `linux-arm64`, `linux-musl-x64`, `linux-musl-arm64`,
 `osx-x64` and `osx-arm64`, and `sw-serverless-win-x64.zip`, with a `SHA256SUMS` file. On Linux or
 macOS, the install script picks your platform, checks the download and installs to `~/.local/bin`:

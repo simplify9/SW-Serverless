@@ -15,7 +15,7 @@ manages published versions.
 ## Installing
 
 Self-contained binaries are published on the
-[GitHub releases](https://github.com/simplify9/SW-Serverless/releases) tagged `cli-v<version>`:
+[GitHub releases](https://github.com/simplify9/SW-Serverless/releases) as `cli-v<version>`, released with each version of the packages:
 
 | Platform | Asset |
 |---|---|

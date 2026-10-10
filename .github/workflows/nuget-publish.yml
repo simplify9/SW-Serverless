@@ -33,3 +33,23 @@ jobs:
     secrets:
       nuget-api-key: ${{ secrets.SWNUGETKEY }}
       dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
+
+  # The sw-serverless CLI and the Python and Node SDKs carry the version the packages were just
+  # published with, so nothing is tagged by hand. From main that is a release; a run by hand on
+  # another branch publishes a prerelease, which releases the CLI as a pre-release and skips the SDKs.
+  CLI:
+    needs: Publish
+    permissions:
+      contents: write         # creates the GitHub release
+    uses: ./.github/workflows/cli-release.yml
+    with:
+      version: ${{ needs.Publish.outputs.version }}
+
+  SDKs:
+    needs: Publish
+    permissions:
+      contents: read
+    uses: ./.github/workflows/sdk-release.yml
+    with:
+      version: ${{ needs.Publish.outputs.version }}
+    secrets: inherit

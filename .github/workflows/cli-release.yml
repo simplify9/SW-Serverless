@@ -1,21 +1,47 @@
 name: sw-serverless CLI release
 
-# A tag cli-v<version> (cli-v10.2.0) publishes the sw-serverless command as self-contained
-# binaries on a GitHub release: nothing needs .NET installed to run them.
+# Publishes the sw-serverless command as self-contained binaries on a GitHub release: nothing needs .NET
+# installed to run them. Never run by hand or by a tag: the CI run that publishes this repository
+# calls it with the version it computed (determine-semver: the next patch from the git tags, the
+# run number for a prerelease), so the CLI carries the version of the release it ships with.
+#   a release, 10.0.61                                  cli-v10.0.61          the latest release
+#   a prerelease, 10.0.61-releases-r10-0-staging.121    cli-v10.0.61-stg.121  a pre-release, to try out
+# Called by nuget-publish.yml, after the packages are published.
 on:
-  push:
-    tags: ["cli-v*"]
-  workflow_dispatch:
+  workflow_call:
     inputs:
       version:
-        description: "Version to release, e.g. 10.2.0 (tagged cli-v<version>)"
+        description: "The version the calling run computed"
+        type: string
         required: true
 
 permissions:
   contents: write
 
 jobs:
+  channel:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.channel.outputs.version }}
+      prerelease: ${{ steps.channel.outputs.prerelease }}
+    steps:
+      - name: Channel
+        id: channel
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          v="$VERSION"
+          if [[ "$v" == *-* ]]; then
+            # A prerelease names its branch and run: 10.0.61-releases-r10-0-staging.121 is 10.0.61-stg.121.
+            v="${v%%-*}-stg.${v##*.}"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: channel
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -25,17 +51,11 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
-      - name: Version
-        id: version
-        run: |
-          v="${{ github.event.inputs.version }}"
-          [ -z "$v" ] && v="${GITHUB_REF_NAME#cli-v}"
-          echo "value=$v" >> "$GITHUB_OUTPUT"
       - name: Publish
         run: >
           dotnet publish SW.Serverless.Installer -c Release -r ${{ matrix.rid }} --self-contained
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none
-          -p:Version=${{ steps.version.outputs.value }} -o out
+          -p:Version=${{ needs.channel.outputs.version }} -o out
       - name: Package
         run: |
           mkdir -p dist
@@ -51,10 +71,9 @@ jobs:
           path: dist/*
 
   release:
-    needs: build
+    needs: [channel, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -64,8 +83,14 @@ jobs:
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          v="${{ github.event.inputs.version }}"
-          [ -z "$v" ] && v="${GITHUB_REF_NAME#cli-v}"
-          gh release create "cli-v$v" dist/* --title "sw-serverless $v" --target "${{ github.sha }}" \
-            --notes "The sw-serverless command, self-contained for each platform. Install: curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.event.repository.default_branch }}/scripts/install-cli.sh | sh — or download the archive for your platform and check it against SHA256SUMS."
+          v="${{ needs.channel.outputs.version }}"
+          install="curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install-cli.sh"
+          if [ "${{ needs.channel.outputs.prerelease }}" = "true" ]; then
+            gh release create "cli-v$v" dist/* --title "sw-serverless CLI $v (pre-release)" --target "${{ github.sha }}" --prerelease \
+              --notes "A pre-release of the sw-serverless command, built from ${{ github.ref_name }}, to try out. Install: $install | SW_SERVERLESS_VERSION=$v sh — or download the archive for your platform and check it against SHA256SUMS."
+          else
+            gh release create "cli-v$v" dist/* --title "sw-serverless CLI $v" --target "${{ github.sha }}" --latest \
+              --notes "The sw-serverless command, self-contained for each platform. Install: $install | sh — or download the archive for your platform and check it against SHA256SUMS."
+          fi
