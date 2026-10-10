@@ -1,15 +1,17 @@
 name: SDK release
 
-# A tag sdk-v<version> (sdk-v10.2.0) publishes the Python SDK to PyPI as sw-serverless and the
-# Node SDK to npm as @simplyworks/sw-serverless, at that version. Each is tested first, and a
-# version already on its registry is left alone, so a failed run can simply be run again.
+# Publishes the Python SDK to PyPI as sw-serverless and the Node SDK to npm as
+# @simplyworks/sw-serverless. Never run by hand or by a tag: nuget-publish.yml calls it with the
+# version it computed, so the SDKs carry the version of the packages they ship with. Only a release
+# version is published; a prerelease (a branch build) isn't, since PyPI and npm consumers on a plain
+# version range would pick it up. Each is tested first, and a version already on its registry is
+# left alone, so a failed run can simply be run again.
 on:
-  push:
-    tags: ["sdk-v*"]
-  workflow_dispatch:
+  workflow_call:
     inputs:
       version:
-        description: "Version to publish, e.g. 10.2.0"
+        description: "The version the calling run computed"
+        type: string
         required: true
 
 permissions:
@@ -17,6 +19,7 @@ permissions:
 
 jobs:
   python:
+    if: ${{ !contains(inputs.version, '-') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -28,10 +31,12 @@ jobs:
           python-version: "3.12"
       - name: Version
         id: version
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          v="${{ github.event.inputs.version }}"
-          [ -z "$v" ] && v="${GITHUB_REF_NAME#sdk-v}"
+          v="$VERSION"
           sed -i -E "s/^version = \".*\"/version = \"$v\"/" pyproject.toml
+          sed -i -E "s/^SDK_VERSION = \".*\"/SDK_VERSION = \"$v\"/" src/sw_serverless/_runner.py
           echo "value=$v" >> "$GITHUB_OUTPUT"
       - name: Test
         run: PYTHONPATH=src python -m unittest discover -s tests
@@ -46,6 +51,7 @@ jobs:
           skip-existing: true
 
   node:
+    if: ${{ !contains(inputs.version, '-') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -58,10 +64,12 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Version
         id: version
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          v="${{ github.event.inputs.version }}"
-          [ -z "$v" ] && v="${GITHUB_REF_NAME#sdk-v}"
+          v="$VERSION"
           npm version "$v" --no-git-tag-version --allow-same-version
+          sed -i -E "s/^const SDK_VERSION = \".*\";/const SDK_VERSION = \"$v\";/" src/index.js
           echo "value=$v" >> "$GITHUB_OUTPUT"
       - name: Test
         run: node --test

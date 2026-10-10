@@ -20,8 +20,9 @@ case "$arch" in
 esac
 rid="$os-$arch"
 
+# The newest release; a pre-release (-stg) only when named.
 if [ -n "${SW_SERVERLESS_VERSION:-}" ]; then tag="cli-v$SW_SERVERLESS_VERSION"
-else tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases" | grep -o '"tag_name": *"cli-v[^"]*"' | head -1 | sed 's/.*"\(cli-v[^"]*\)"/\1/'); fi
+else tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases" | grep -o '"tag_name": *"cli-v[^"]*"' | sed 's/.*"\(cli-v[^"]*\)"/\1/' | grep -E '^cli-v[0-9.]+$' | head -1); fi
 [ -n "$tag" ] || { echo "No sw-serverless release found" >&2; exit 1; }
 
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
