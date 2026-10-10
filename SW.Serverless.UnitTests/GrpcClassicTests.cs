@@ -17,7 +17,7 @@ using System.Threading.Tasks;
 namespace SW.Serverless.UnitTests
 {
     /// <summary>
-    /// A classic session — start, call, dispose, as Bitween runs handlers — with an adapter that
+    /// A classic session — start, call, dispose, as an application runs one call — with an adapter that
     /// speaks gRPC: what every adapter in a language other than .NET does, and a .NET adapter
     /// whose manifest opts in with protocol 2. IServerlessService is unchanged for the caller; the
     /// session runs on a resident instance of its own.
@@ -102,6 +102,24 @@ namespace SW.Serverless.UnitTests
             host.Services.GetRequiredService<IResidentAdapterHost>().Describe().Select(h => h.InstanceKey);
 
         [TestMethod]
+        public async Task A_session_without_a_correlation_id_or_with_null_values_still_starts()
+        {
+            // A protobuf map can't hold a null: a session started with no correlation id, or a
+            // setting left null, failed before the adapter was ready.
+            var service = Service();
+            await service.StartAsync(AdapterId, null, new Dictionary<string, string> { ["Prefix"] = "hi ", ["Unset"] = null });
+            try
+            {
+                Assert.AreEqual("hi world", await service.InvokeAsync<string>("Greet", "world"));
+                Assert.IsTrue(string.IsNullOrEmpty(await service.InvokeAsync<string>("Correlation", null)));
+            }
+            finally
+            {
+                ((IDisposable)service).Dispose();
+            }
+        }
+
+        [TestMethod]
         public async Task A_call_returns_the_adapter_s_answer_using_the_startup_values_it_was_given()
         {
             var service = Service();
@@ -166,8 +184,8 @@ namespace SW.Serverless.UnitTests
                 var described = host.Services.GetRequiredService<IResidentAdapterHost>().Describe()
                     .Single(h => !before.Contains(h.InstanceKey));
                 Assert.AreEqual("dotnet", described.SdkLanguage);
-                CollectionAssert.AreEqual(new[] { "handler" }, described.Kinds.ToList());
-                Assert.AreEqual(1, described.Contracts["bitween"]);
+                CollectionAssert.AreEqual(new[] { "processor" }, described.Kinds.ToList());
+                Assert.AreEqual(1, described.Contracts["orders"]);
                 Assert.AreEqual("10.1.0", described.SdkVersion);
             }
             finally

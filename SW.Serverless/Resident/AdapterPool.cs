@@ -10,7 +10,7 @@ namespace SW.Serverless.Resident
 {
     /// <summary>
     /// Warm stateless workers, checked out per logical session. This is the shape that removes
-    /// process spawn plus JIT from every request — nothing to do with brokers (design doc 14.5).
+    /// process spawn plus JIT from every request — nothing to do with brokers.
     /// Only for adapters that declare Poolable and implement IResettable.
     /// </summary>
     internal class AdapterPool : IAsyncDisposable
@@ -187,7 +187,7 @@ namespace SW.Serverless.Resident
         /// <summary>
         /// Retires warm instances that have sat checked-in longer than the idle timeout, so a
         /// quiet pool shrinks back down instead of holding its peak size forever. Called
-        /// periodically by the host's supervisor loop (design doc 14.5's "idle eviction"). A no-op
+        /// periodically by the host's supervisor loop. A no-op
         /// when no idle timeout is configured for this adapter.
         /// </summary>
         public async Task EvictIdleAsync()

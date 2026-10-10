@@ -23,7 +23,7 @@ namespace SW.Serverless.Tooling
         public string IconDataUri { get; set; }
     }
 
-    /// <summary>One row of <c>serverless versions</c>.</summary>
+    /// <summary>One row of <c>sw-serverless versions</c>.</summary>
     public class VersionRow
     {
         public string Version { get; set; }
@@ -46,13 +46,13 @@ namespace SW.Serverless.Tooling
     /// <summary>
     /// The adapters layout in storage, and the only code in the installer that writes to it.
     ///
-    /// The layout is a contract with ten production deployments running hosts and Bitween builds
-    /// older than the catalog, so it is held to three rules:
+    /// The layout is a contract with production deployments running hosts — and applications that
+    /// list adapters from storage — older than the catalog, so it is held to three rules:
     /// <list type="number">
     /// <item><c>adapters/{id}</c> always holds whatever is current, with the full metadata an old
     /// host needs to run it (EntryAssembly and Hash at least).</item>
-    /// <item>Nothing but <c>adapters/{id}</c> is ever written under <c>adapters/</c> — older Bitween
-    /// lists every key there as an adapter. Versions an older installer put at
+    /// <item>Nothing but <c>adapters/{id}</c> is ever written under <c>adapters/</c> — older
+    /// listings take every key there for an adapter. Versions an older installer put at
     /// <c>adapters/{id}/{version}</c> are read, never written.</item>
     /// <item>Everything new lives beside it: versions under <c>adapters-versions/</c>, the catalog
     /// under <c>adapters-catalog/</c>. Nothing old reads either.</item>
@@ -71,13 +71,22 @@ namespace SW.Serverless.Tooling
         readonly ICloudFilesService files;
         readonly AdapterCatalogStore catalog;
         readonly Action<string> log;
+        readonly string root;
 
-        public AdapterRepository(ICloudFilesService files, Action<string> log = null)
+        /// <param name="root">
+        /// The adapters' folder in storage, as hosts are configured with it (AdapterRemotePath);
+        /// <see cref="Root"/> unless a deployment changed it.
+        /// </param>
+        public AdapterRepository(ICloudFilesService files, Action<string> log = null, string root = Root)
         {
             this.files = files ?? throw new ArgumentNullException(nameof(files));
-            catalog = new AdapterCatalogStore(files, Root);
+            this.root = string.IsNullOrWhiteSpace(root) ? Root : root.Trim().TrimEnd('/');
+            catalog = new AdapterCatalogStore(files, this.root);
             this.log = log ?? Console.WriteLine;
         }
+
+        /// <summary>The folder this repository publishes under.</summary>
+        public string RemotePath => root;
 
         public AdapterCatalogStore Catalog => catalog;
 
@@ -96,10 +105,11 @@ namespace SW.Serverless.Tooling
         /// Version is empty for an unversioned upload.
         /// </remarks>
         public static Dictionary<string, string> LegacyMetadata(
-            string entryAssembly, string lifecycle, string kind, string sha256, string version) => new()
+            string entryAssembly, string lifecycle, string kind, string sha256, string version, string runtime = null) => new()
         {
             { "EntryAssembly", entryAssembly },
-            { "Lang", "dotnet" },
+            // The runtime it starts on; dotnet for every package before runtimes.
+            { "Lang", string.IsNullOrWhiteSpace(runtime) ? AdapterManifest.DotnetRuntime : runtime },
             { "Timestamp", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") },
             { "Lifecycle", string.IsNullOrWhiteSpace(lifecycle) ? AdapterDescription.ClassicLifecycle : lifecycle },
             { "Kind", kind ?? "" },
@@ -111,6 +121,9 @@ namespace SW.Serverless.Tooling
         // ---------------------------------------------------------------- versions
 
         public static string CurrentKey(string adapterId) => AdapterCatalogPaths.Current(Root, adapterId);
+
+        string CurrentKeyOf(string adapterId) => AdapterCatalogPaths.Current(root, adapterId);
+        string VersionKeyOf(string adapterId, string version) => AdapterCatalogPaths.Version(root, adapterId, version);
 
         /// <summary>Where this installer writes a version: <c>adapters-versions/{id}/{version}</c>.</summary>
         public static string VersionKey(string adapterId, string version) => AdapterCatalogPaths.Version(Root, adapterId, version);
@@ -124,18 +137,18 @@ namespace SW.Serverless.Tooling
         {
             var located = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            var root = AdapterCatalogPaths.VersionsRoot(Root, adapterId).TrimEnd('/');
-            foreach (var version in InstallerLogic.ExistingVersions(root,
-                         (await files.ListAsync($"{root}/")).Select(f => f.Key)))
-                if (AdapterCatalogPaths.IsVersion(version)) located[version] = VersionKey(adapterId, version);
+            var versionsRoot = AdapterCatalogPaths.VersionsRoot(root, adapterId).TrimEnd('/');
+            foreach (var version in InstallerLogic.ExistingVersions(versionsRoot,
+                         (await files.ListAsync($"{versionsRoot}/")).Select(f => f.Key)))
+                if (AdapterCatalogPaths.IsVersion(version)) located[version] = VersionKeyOf(adapterId, version);
 
             // Listed WITH the slash, so "foo" does not pick up "foobar"'s versions, nor the current
             // package adapters/foo itself.
-            var legacy = CurrentKey(adapterId);
+            var legacy = CurrentKeyOf(adapterId);
             foreach (var version in InstallerLogic.ExistingVersions(legacy,
                          (await files.ListAsync($"{legacy}/")).Select(f => f.Key)))
                 if (AdapterCatalogPaths.IsVersion(version))
-                    located.TryAdd(version, AdapterCatalogPaths.LegacyVersion(Root, adapterId, version));
+                    located.TryAdd(version, AdapterCatalogPaths.LegacyVersion(root, adapterId, version));
 
             return located;
         }
@@ -205,7 +218,7 @@ namespace SW.Serverless.Tooling
         public async Task PublishVersionAsync(string adapterId, string version, string zipPath, PackageInfo package,
             bool promote, string publishedBy)
         {
-            var versionKey = VersionKey(adapterId, version);
+            var versionKey = VersionKeyOf(adapterId, version);
 
             // Immutable: Semver already refuses an explicit version that exists, and this catches
             // one published between resolving the number and uploading it.
@@ -215,7 +228,7 @@ namespace SW.Serverless.Tooling
             // An id keeps its runtime: hosts that predate manifests run adapters/{id} with dotnet,
             // and would go on running the old .NET package under an id that had moved on.
             var runsOnDotnet = RunsOnDotnet(package.Manifest);
-            if (!runsOnDotnet && await ExistsAsync(CurrentKey(adapterId)))
+            if (!runsOnDotnet && await ExistsAsync(CurrentKeyOf(adapterId)))
                 throw new SWException(
                     $"'{adapterId}' is a .NET adapter, and older hosts would keep running that under its id. " +
                     $"Publish the {package.Manifest!.Runtime} adapter under a new id.");
@@ -223,13 +236,13 @@ namespace SW.Serverless.Tooling
             // Loaded before uploading, so the new version is not mistaken for one the catalog missed.
             var entry = await LoadEntryAsync(adapterId);
             var sha256 = InstallerLogic.Sha256Of(zipPath);
-            var metadata = LegacyMetadata(package.EntryAssembly, package.Lifecycle, package.Kind, sha256, version);
+            var metadata = LegacyMetadata(package.EntryAssembly, package.Lifecycle, package.Kind, sha256, version, package.Manifest?.Runtime);
 
             await UploadAsync(versionKey, zipPath, metadata);
             // adapters/{id} is what hosts before manifests list and run, always with dotnet. An
             // adapter in another runtime never goes there; newer hosts find its current version in
             // the catalog.
-            if (promote && runsOnDotnet) await UploadAsync(CurrentKey(adapterId), zipPath, metadata);
+            if (promote && runsOnDotnet) await UploadAsync(CurrentKeyOf(adapterId), zipPath, metadata);
 
             entry.Versions.Add(new AdapterVersionRecord
             {
@@ -246,7 +259,7 @@ namespace SW.Serverless.Tooling
             log(promote
                 ? $"Version {version} of '{adapterId}' is published and current."
                 : $"Version {version} of '{adapterId}' is published; '{adapterId}' still runs " +
-                  $"{(entry.Current ?? "its unversioned package")}. Run 'serverless promote {adapterId} {version}' to switch.");
+                  $"{(entry.Current ?? "its unversioned package")}. Run 'sw-serverless promote {adapterId} {version}' to switch.");
         }
 
         /// <summary>
@@ -265,8 +278,8 @@ namespace SW.Serverless.Tooling
             var entry = await LoadEntryAsync(adapterId);
             var sha256 = InstallerLogic.Sha256Of(zipPath);
 
-            await UploadAsync(CurrentKey(adapterId), zipPath,
-                LegacyMetadata(package.EntryAssembly, package.Lifecycle, package.Kind, sha256, null));
+            await UploadAsync(CurrentKeyOf(adapterId), zipPath,
+                LegacyMetadata(package.EntryAssembly, package.Lifecycle, package.Kind, sha256, null, package.Manifest?.Runtime));
 
             MakeCurrent(entry, null, package.Manifest, sha256, package.IconDataUri);
             await catalog.SaveAsync(entry);
@@ -354,10 +367,10 @@ namespace SW.Serverless.Tooling
                 var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var item in versionMetadata.Where(m => !ProviderMetadata.Contains(m.Key)))
                     metadata[item.Key] = item.Value;
-                foreach (var item in LegacyMetadata(entryAssembly, lifecycle, kind, sha256, version))
+                foreach (var item in LegacyMetadata(entryAssembly, lifecycle, kind, sha256, version, manifest?.Runtime))
                     metadata[item.Key] = item.Value;
 
-                await UploadAsync(CurrentKey(adapterId), zipPath, metadata);
+                await UploadAsync(CurrentKeyOf(adapterId), zipPath, metadata);
 
                 record.Sha256 ??= sha256;
                 record.Manifest ??= manifest;
@@ -427,7 +440,7 @@ namespace SW.Serverless.Tooling
             }
 
             var listing = new VersionListing { FromCatalog = false };
-            var current = await ExistsAsync(CurrentKey(adapterId)) ? await MetadataAsync(CurrentKey(adapterId)) : null;
+            var current = await ExistsAsync(CurrentKeyOf(adapterId)) ? await MetadataAsync(CurrentKeyOf(adapterId)) : null;
             var currentVersion = Value(current, "Version");
             var currentSha = Value(current, "Sha256");
 

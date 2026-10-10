@@ -118,7 +118,7 @@ namespace SW.Serverless
                 throw new Exception("Already started.");
 
             // Copy rather than mutate. The caller's dictionary is often a long-lived entity's own
-            // settings — Traxis passes agent.Settings straight in — so adding CorrelationId to it
+            // settings, passed straight in — so adding CorrelationId to it
             // leaked into that entity, and a second call with the same dictionary threw
             // "An item with the same key has already been added".
             var values = startupValues == null

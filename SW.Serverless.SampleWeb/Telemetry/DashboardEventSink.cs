@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 namespace SW.Serverless.SampleWeb.Telemetry
 {
     /// <summary>
-    /// Stands in for a real ingest path. Bitween would persist an Xchange and return its id here;
+    /// Stands in for a real ingest path. A real host would persist the message and return its id here;
     /// the adapter does not acknowledge its broker until this returns Accepted.
     /// </summary>
     public class DashboardEventSink : IAdapterEventSink

@@ -113,7 +113,7 @@ public class PackageLayoutTests
         await repository.PublishVersionAsync(id, "1.0.0", Package(Python(id)), package, promote: true, "compat");
         await repository.PublishVersionAsync(id, "1.1.0", Package(Python(id)), package, promote: false, "compat");
 
-        Assert.AreEqual(0, (await bucket.KeysAsync("adapters/")).Count, "nothing under adapters/, where old hosts and old Bitween look");
+        Assert.AreEqual(0, (await bucket.KeysAsync("adapters/")).Count, "nothing under adapters/, where old hosts and old listings look");
         Assert.AreEqual("1.0.0", (await repository.LoadEntryAsync(id)).Current);
 
         var old = await Compat.RunOldHostAsync(bucket, id, "--command", "Echo", "--input", "x");

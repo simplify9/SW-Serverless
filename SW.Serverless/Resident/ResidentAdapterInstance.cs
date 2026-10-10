@@ -8,6 +8,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -18,7 +19,7 @@ namespace SW.Serverless.Resident
 
     /// <summary>
     /// One live adapter process, as the host sees it. Callers hold a HANDLE, never ownership —
-    /// a DI scope ending must not kill a broker connection (design doc 4).
+    /// a DI scope ending must not kill a broker connection.
     /// </summary>
     public sealed class ResidentAdapterInstance : IAsyncDisposable
     {
@@ -29,7 +30,7 @@ namespace SW.Serverless.Resident
         readonly IAdapterStateStore stateStore;
 
         // The correlation fix: every outstanding call is keyed, so a late reply can never
-        // resolve an unrelated one the way the single v1 field did (design doc 14.3).
+        // resolve an unrelated one the way the single v1 field did.
         readonly ConcurrentDictionary<long, PendingCall> pending = new();
 
         readonly Channel<HostFrame> outbound = Channel.CreateUnbounded<HostFrame>(
@@ -118,10 +119,10 @@ namespace SW.Serverless.Resident
         /// <summary>The settings the adapter says it reads; empty from an SDK that predates them.</summary>
         public IReadOnlyCollection<AdapterSetting> Settings { get; internal set; } = Array.Empty<AdapterSetting>();
 
-        /// <summary>The kinds it implements for a contract, e.g. handler or receiver for Bitween.</summary>
+        /// <summary>The kinds it implements for a contract, as that contract names them.</summary>
         public IReadOnlyCollection<string> Kinds { get; internal set; } = Array.Empty<string>();
 
-        /// <summary>The contracts it implements and their versions, e.g. bitween → 1.</summary>
+        /// <summary>The contracts it implements and their versions, e.g. orders → 1.</summary>
         public IReadOnlyDictionary<string, int> Contracts { get; internal set; } = new Dictionary<string, int>();
         public int ProtocolVersion { get; internal set; }
         public IReadOnlyDictionary<string, string> AdapterValues { get; internal set; }
@@ -183,12 +184,8 @@ namespace SW.Serverless.Resident
                 Ready = new Ready
                 {
                     MaxInFlight = options.MaxInFlight,
-                    StartupValues = { (IDictionary<string, string>)(StartupValues == null
-                        ? new Dictionary<string, string>()
-                        : new Dictionary<string, string>(StartupValues)) },
-                    AdapterValues = { (IDictionary<string, string>)(AdapterValues == null
-                        ? new Dictionary<string, string>()
-                        : new Dictionary<string, string>(AdapterValues)) }
+                    StartupValues = { WithoutNulls(StartupValues) },
+                    AdapterValues = { WithoutNulls(AdapterValues) }
                 }
             });
 
@@ -423,7 +420,7 @@ namespace SW.Serverless.Resident
                 : options.InvokeTimeout;
 
             // On timeout the call is REMOVED, so a late reply is discarded rather than
-            // resolving the next caller's completion — the v1 defect (design doc 14.3).
+            // resolving the next caller's completion — the v1 defect.
             call.Timer = new Timer(_ =>
             {
                 if (pending.TryRemove(id, out var c))
@@ -479,6 +476,16 @@ namespace SW.Serverless.Resident
             if (State is InstanceState.Ready or InstanceState.Draining && System.Linq.Enumerable.Contains(Capabilities, "cancel"))
                 Send(new HostFrame { Id = id, Cancel = new Cancel() });
         }
+
+        /// <summary>
+        /// The values that have one. A protobuf map can't hold a null and throws on one, which ended
+        /// the stream before the adapter was ever ready: a gateway's validator call has no
+        /// correlation id, for one. Left out, a value reads as absent, which is what null meant.
+        /// </summary>
+        static IDictionary<string, string> WithoutNulls(IEnumerable<KeyValuePair<string, string>> values) =>
+            values == null
+                ? new Dictionary<string, string>()
+                : values.Where(kv => kv.Key != null && kv.Value != null).ToDictionary(kv => kv.Key, kv => kv.Value);
 
         public async Task<Pong> PingAsync(TimeSpan timeout)
         {

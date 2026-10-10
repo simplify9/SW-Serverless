@@ -40,7 +40,7 @@ jobs:
       - name: Test installer
         run: dotnet test SW.Serverless.Installer.UnitTests/SW.Serverless.Installer.UnitTests.csproj -c Release --no-build
 
-      # Hosts on the published SimplyWorks.Serverless 10.0.x, older Bitween listings and adapters on
+      # Hosts on the published SimplyWorks.Serverless 10.0.x, older storage listings and adapters on
       # the published SDK, against what this branch's installer and host write and read. Outside the
       # *UnitTests glob the publish workflow uses, so it is run here explicitly.
       - name: Test backward compatibility

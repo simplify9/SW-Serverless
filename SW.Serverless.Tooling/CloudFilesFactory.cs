@@ -94,7 +94,7 @@ namespace SW.Serverless.Tooling
                     break;
 
                 case "local":
-                    // The filesystem provider, for a developer running Bitween against a local
+                    // The filesystem provider, for a developer running a host against a local
                     // store. Publishing to it is the same command with a different -p, rather than
                     // the hand-built zip and .meta.json it used to take.
                     services.AddLocalTestsCloudFiles(o =>

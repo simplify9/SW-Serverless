@@ -6,11 +6,6 @@ using SW.CloudFiles.OC;
 
 namespace SW.Serverless.Installer
 {
-    public class FileData
-    {
-        public ServerlessUploadOptions CloudFiles { get; set; }
-    }
-
     /// <summary>
     /// Where the adapters live. Shared by publishing and by the promote, versions and withdraw
     /// commands, so every command finds the store the same way: flags, then -c, then SWSL_*.
@@ -36,6 +31,12 @@ namespace SW.Serverless.Installer
 
         [Option('c', "cloudfilesconfigpath", HelpText = "Json cloud files config path. Oracle Cloud needs one; Google Cloud needs one or the SWSL_GC_* environment variables.")]
         public string CloudFilesConfigPath { get; set; }
+
+        public StorageFlags ToFlags() => new()
+        {
+            Provider = Provider, AccessKeyId = AccessKeyId, SecretAccessKey = SecretAccessKey,
+            BucketName = BucketName, ServiceUrl = ServiceUrl, CloudFilesConfigPath = CloudFilesConfigPath,
+        };
     }
 
     public class CliOptions : StorageCliOptions
@@ -54,7 +55,7 @@ namespace SW.Serverless.Installer
         public string Version { get; set; }
 
         [Option("no-promote",
-            HelpText = "With -v: upload the version without making it the one that runs. Promote it later with 'serverless promote'.")]
+            HelpText = "With -v: upload the version without making it the one that runs. Promote it later with 'sw-serverless promote'.")]
         public bool NoPromote { get; set; }
 
         [Option("notes", HelpText = "Release notes for this version (Markdown). Overrides releaseNotes in adapter.json.")]
@@ -76,7 +77,7 @@ namespace SW.Serverless.Installer
         public string AdapterId { get; set; }
     }
 
-    /// <summary><c>serverless promote &lt;id&gt; &lt;version&gt;</c></summary>
+    /// <summary><c>sw-serverless promote &lt;id&gt; &lt;version&gt;</c></summary>
     public class PromoteCliOptions : StorageCliOptions
     {
         [Value(0, Required = true, MetaName = "adapter-id", HelpText = "Adapter Id.")]
@@ -86,14 +87,14 @@ namespace SW.Serverless.Installer
         public string Version { get; set; }
     }
 
-    /// <summary><c>serverless versions &lt;id&gt;</c></summary>
+    /// <summary><c>sw-serverless versions &lt;id&gt;</c></summary>
     public class VersionsCliOptions : StorageCliOptions
     {
         [Value(0, Required = true, MetaName = "adapter-id", HelpText = "Adapter Id.")]
         public string AdapterId { get; set; }
     }
 
-    /// <summary><c>serverless withdraw &lt;id&gt; &lt;version&gt;</c></summary>
+    /// <summary><c>sw-serverless withdraw &lt;id&gt; &lt;version&gt;</c></summary>
     public class WithdrawCliOptions : StorageCliOptions
     {
         [Value(0, Required = true, MetaName = "adapter-id", HelpText = "Adapter Id.")]

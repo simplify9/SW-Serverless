@@ -152,7 +152,7 @@ namespace SW.Serverless.Samples.Host
 
         /// <summary>
         /// A sample shortcut. In the real host this is the existing S3 download-and-extract step,
-        /// which is unchanged by protocol 2 — see the design doc, section 15.2.
+        /// which is unchanged by protocol 2.
         /// </summary>
         static string Locate(string project)
         {

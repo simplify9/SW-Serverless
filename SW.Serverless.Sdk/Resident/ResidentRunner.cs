@@ -23,7 +23,7 @@ namespace SW.Serverless.Sdk.Resident
     /// <summary>
     /// The adapter side of protocol 2. Dials the host over a Unix domain socket (Linux / macOS)
     /// or a named pipe (Windows) and pumps one bidirectional gRPC stream.
-    /// See the design doc, section 15.
+    ///
     /// </summary>
     public sealed class ResidentRunner : IAdapterContext
     {
@@ -138,7 +138,7 @@ namespace SW.Serverless.Sdk.Resident
         {
             var line = await Console.In.ReadLineAsync();
 
-            // A null read means the parent is gone. v1 spun here forever — design doc 3, item 7.
+            // A null read means the parent is gone. v1 spun here forever.
             if (line == null)
                 throw new IOException("stdin closed before the handshake arrived; parent process is gone.");
 
@@ -304,7 +304,7 @@ namespace SW.Serverless.Sdk.Resident
 
                     case HostFrame.BodyOneofCase.Invoke:
                         // Deliberately not awaited: a slow command must not block the read loop,
-                        // which is the whole point of multiplexing (design doc 3, item 1).
+                        // which is the whole point of multiplexing.
                         StartInvoke(frame.Id, frame.Invoke);
                         break;
 
@@ -351,7 +351,10 @@ namespace SW.Serverless.Sdk.Resident
             catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled) { return false; }
         }
 
-        async Task OnReadyAsync(Ready ready)
+        /// <summary>The resident adapter's start, which every command waits for.</summary>
+        Task started = Task.CompletedTask;
+
+        Task OnReadyAsync(Ready ready)
         {
             startupValues = new Dictionary<string, string>(ready.StartupValues, StringComparer.OrdinalIgnoreCase);
             adapterValues = new Dictionary<string, string>(ready.AdapterValues, StringComparer.OrdinalIgnoreCase);
@@ -363,8 +366,25 @@ namespace SW.Serverless.Sdk.Resident
             resident = handler as IResidentAdapter;
             resettable = handler as IResettable;
 
+            // Started beside the read loop, not inside it: a start that publishes an event or reads
+            // its state waits for the host's answer, which only the read loop can take in. Commands
+            // wait for it to finish; if it fails, the adapter stops, as it did when it was awaited here.
             if (resident != null)
-                await resident.StartAsync(this, stopping.Token);
+                started = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await resident.StartAsync(this, stopping.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        AdapterLogger.LogError(ex, "The resident adapter failed to start.");
+                        Environment.ExitCode = 1;
+                        stopping.Cancel();
+                        throw;
+                    }
+                });
+            return Task.CompletedTask;
         }
 
         /// <summary>
@@ -395,6 +415,7 @@ namespace SW.Serverless.Sdk.Resident
             {
                 if (handler == null)
                     throw new InvalidOperationException("The adapter has not been made ready yet.");
+                await started.ConfigureAwait(false);
 
                 if (!commands.TryGetValue(invoke.Command, out var method))
                     throw new MissingMethodException(handlerType.FullName, invoke.Command);
@@ -522,6 +543,11 @@ namespace SW.Serverless.Sdk.Resident
             // its consume loop and PublishAsync calls observe — was already cancelled, so there
             // was nothing left to finish. Ask it to stop, let it drain, and only then cancel.
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(shutdown.Drain ? 30 : 5);
+
+            // A start still running finishes first, as it did when start held up the read loop: a
+            // stop that overtook it would leave half of what start set up in place.
+            try { await Task.WhenAny(started, Task.Delay(deadline - DateTime.UtcNow)); } catch { }
+
             if (resident != null)
             {
                 using var cts = new CancellationTokenSource(deadline - DateTime.UtcNow);

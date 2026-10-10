@@ -29,7 +29,7 @@ namespace SW.Serverless.Resident
     }
 
     /// <summary>
-    /// Implemented by the HOST APPLICATION. In Bitween this persists an Xchange and returns its id;
+    /// Implemented by the HOST APPLICATION. An integration platform, say, persists the message and returns its id;
     /// the adapter does not acknowledge its broker until this has returned Accepted.
     /// </summary>
     public interface IAdapterEventSink

@@ -15,7 +15,7 @@ namespace SW.Serverless.Resident
 
         /// <summary>
         /// Path to the entry assembly. When null the configured locator resolves it — which is
-        /// where the existing S3 download-and-extract step plugs in unchanged (design doc 15.2).
+        /// where the existing S3 download-and-extract step plugs in unchanged.
         /// </summary>
         public string EntryAssemblyPath { get; set; }
 

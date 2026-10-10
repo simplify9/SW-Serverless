@@ -57,20 +57,35 @@ namespace SW.Serverless.Tooling.Conformance
             };
         }
 
-        /// <summary>The contracts the kit knows by name, carried with it.</summary>
+        static readonly List<ContractDocument> registered = new();
+
+        /// <summary>
+        /// Makes a contract known by name, so the kit checks every adapter that declares it without
+        /// being handed it each time — what an application's own CLI does with its contract.
+        /// </summary>
+        public static void Register(ContractDocument contract)
+        {
+            if (contract == null) throw new ArgumentNullException(nameof(contract));
+            lock (registered)
+            {
+                registered.RemoveAll(c => string.Equals(c.Name, contract.Name, StringComparison.OrdinalIgnoreCase) && c.Version == contract.Version);
+                registered.Add(contract);
+            }
+        }
+
+        /// <summary>A registered contract, or null. The kit carries none of its own.</summary>
         public static ContractDocument Known(string name, int version)
         {
-            // Found by file name: the folder in a resource's name is written with whichever
-            // separator the machine that built it uses.
-            var file = $"{name}-adapter-contract.v{version}.json";
-            var resource = typeof(ContractDocument).Assembly.GetManifestResourceNames()
-                .FirstOrDefault(r => r.StartsWith("SW.Serverless.Tooling.Contracts.", StringComparison.Ordinal) &&
-                                     r.EndsWith(file, StringComparison.Ordinal));
-            if (resource == null) return null;
-
-            var prefix = resource[..^file.Length];
-            return new ContractDocument(JObject.Parse(ReadResource(resource)), sibling => ReadResource(prefix + sibling));
+            lock (registered)
+                return registered.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase) && c.Version == version);
         }
+
+        /// <summary>
+        /// A contract from its JSON, with <paramref name="readSibling"/> reading the schema files it
+        /// names — from embedded resources, say.
+        /// </summary>
+        public static ContractDocument FromJson(string json, Func<string, string> readSibling) =>
+            new(JObject.Parse(json), readSibling ?? (file => throw new FileNotFoundException($"The contract names {file}, and nothing was given to read it.")));
 
         /// <summary>A contract from a file, with its schemas beside it.</summary>
         public static ContractDocument FromFile(string path)
@@ -78,14 +93,6 @@ namespace SW.Serverless.Tooling.Conformance
             var directory = Path.GetDirectoryName(Path.GetFullPath(path));
             return new ContractDocument(JObject.Parse(File.ReadAllText(path)),
                 file => File.ReadAllText(Path.Combine(directory, file)));
-        }
-
-        static string ReadResource(string name)
-        {
-            using var stream = typeof(ContractDocument).Assembly.GetManifestResourceStream(name)
-                               ?? throw new FileNotFoundException(name);
-            using var reader = new StreamReader(stream);
-            return reader.ReadToEnd();
         }
     }
 

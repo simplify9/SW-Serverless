@@ -7,8 +7,8 @@
         <PackageId>SimplyWorks.Serverless.Contract</PackageId>
         <Authors>Simplify9</Authors>
         <Product>SimplyWorks.Serverless.Contract</Product>
-        <PackageProjectUrl>https://github.com/simplify9/Serverless</PackageProjectUrl>
-        <RepositoryUrl>https://github.com/simplify9/Serverless</RepositoryUrl>
+        <PackageProjectUrl>https://github.com/simplify9/SW-Serverless</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/simplify9/SW-Serverless</RepositoryUrl>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <Copyright>Simplify9</Copyright>
         <Company>Simplify9</Company>

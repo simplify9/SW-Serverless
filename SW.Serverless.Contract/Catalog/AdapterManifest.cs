@@ -101,7 +101,7 @@ namespace SW.Serverless.Contract.Catalog
         /// </summary>
         public Dictionary<string, string> Entries { get; set; }
 
-        /// <summary>The contracts it implements and their versions, e.g. bitween → 1.</summary>
+        /// <summary>The contracts it implements and their versions, e.g. orders → 1.</summary>
         public Dictionary<string, int> Contracts { get; set; }
 
         /// <summary>The source the package was built from, when it carries it.</summary>
@@ -149,6 +149,8 @@ namespace SW.Serverless.Contract.Catalog
         public string EntryFor(string platform) =>
             platform != null && Entries != null && Entries.TryGetValue(platform, out var entry) ? entry : Entry;
 
+        /// <summary>Whether <see cref="Lifecycle"/> is resident. Worked out, so never written.</summary>
+        [JsonIgnore]
         public bool IsResident =>
             string.Equals(Lifecycle, ResidentLifecycle, StringComparison.OrdinalIgnoreCase);
 
@@ -210,6 +212,10 @@ namespace SW.Serverless.Contract.Catalog
             if (Compatibility?.MinHostVersion is { Length: > 0 } host && !VersionPattern.IsMatch(host) &&
                 !System.Version.TryParse(host, out _))
                 problems.Add($"compatibility.minHostVersion '{host}' is not a version.");
+            foreach (var (application, minimum) in Compatibility?.Applications ?? new Dictionary<string, string>())
+                if (string.IsNullOrWhiteSpace(application) || string.IsNullOrWhiteSpace(minimum) ||
+                    (!VersionPattern.IsMatch(minimum) && !System.Version.TryParse(minimum, out _)))
+                    problems.Add($"compatibility.applications '{application}': '{minimum}' is not a version.");
 
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var property in Properties ?? new List<AdapterProperty>())
@@ -287,8 +293,30 @@ namespace SW.Serverless.Contract.Catalog
         /// <summary>The lowest SW.Serverless host that may run it. The host refuses to install it below.</summary>
         public string MinHostVersion { get; set; }
 
-        /// <summary>The lowest Bitween that may use it. Bitween warns and refuses to bind it below.</summary>
-        public string MinBitweenVersion { get; set; }
+        /// <summary>
+        /// The lowest version of each application that may use it, by the application's name. Hosts
+        /// ignore it; each application reads its own and refuses an adapter it is too old for.
+        /// </summary>
+        public Dictionary<string, string> Applications { get; set; }
+
+        /// <summary>
+        /// The lowest version of <paramref name="application"/> that may use the adapter, or null.
+        /// Reads <see cref="Applications"/>, and a manifest written before it with
+        /// "min&lt;Application&gt;Version", which is kept among <see cref="Extensions"/>.
+        /// </summary>
+        public string MinVersionOf(string application)
+        {
+            if (string.IsNullOrWhiteSpace(application)) return null;
+            if (Applications != null)
+                foreach (var (name, version) in Applications)
+                    if (string.Equals(name, application, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(version))
+                        return version;
+            if (Extensions != null)
+                foreach (var (name, value) in Extensions)
+                    if (string.Equals(name, $"min{application}Version", StringComparison.OrdinalIgnoreCase) && value.ValueKind == JsonValueKind.String)
+                        return value.GetString();
+            return null;
+        }
 
         /// <summary>Fields written by a newer tool, kept so they are not lost on a round trip.</summary>
         [JsonExtensionData]

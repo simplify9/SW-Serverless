@@ -5,7 +5,7 @@ namespace SW.Serverless.Sdk.Resident
 {
     /// <summary>
     /// What a heartbeat answers with. Liveness alone cannot separate "alive but disconnected"
-    /// from "connected but receiving nothing" — see the design doc, section 6.4.
+    /// from "connected but receiving nothing".
     /// </summary>
     public class AdapterStatus
     {

@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 namespace SW.Serverless.Samples.Carrier
 {
     /// <summary>
-    /// A typical carrier adapter — the shape the ~107 Traxis agent adapters already have — except
+    /// A typical carrier adapter — the shape most carrier adapters already have — except
     /// that it STAYS RUNNING.
     ///
     /// The point is what does NOT change. The host calls it exactly as it calls a classic adapter:
@@ -168,9 +168,8 @@ namespace SW.Serverless.Samples.Carrier
             if (!reply.Accepted)
             {
                 // A carrier rejection is a RESULT, not an exception. Throwing here would turn a
-                // business outcome into an adapter outage — the pattern Traxis's
-                // CreateShipmentAdapterBase exists to enforce, and which a third of its adapters
-                // skip by deriving from raw AdapterBase.
+                // business outcome into an adapter outage — the pattern a shipment
+                // adapter base class exists to enforce.
                 logger.LogInformation("Carrier rejected {Reference}: {Code} {Message}",
                     request.Reference, reply.ErrorCode, reply.ErrorMessage);
 
@@ -235,7 +234,7 @@ namespace SW.Serverless.Samples.Carrier
         }
 
         /// <summary>
-        /// The Traxis pattern, made safe. Gateway calls GetLogs after every command and merges the
+        /// A common pattern, made safe. The host calls GetLogs after every command and merges the
         /// result into the shipment's audit record; here the entries belong to this session only.
         /// </summary>
         public Task<CallLogResult> GetLogs() => Task.FromResult(callLog.Current());
@@ -264,7 +263,7 @@ namespace SW.Serverless.Samples.Carrier
 
         /// <summary>
         /// One place for deadlines, retries, timing and the audit entry, so no command has to
-        /// remember them — which is exactly what a base class does for the Traxis adapters.
+        /// remember them — which is exactly what a base class does for a family of adapters.
         /// </summary>
         async Task<TReply> CallAsync<TReply>(string operation,
             Func<CancellationToken, AsyncUnaryCall<TReply>> call, bool idempotent = true)

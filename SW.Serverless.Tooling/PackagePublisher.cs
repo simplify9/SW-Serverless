@@ -32,7 +32,7 @@ namespace SW.Serverless.Tooling
         public string PublishedBy { get; set; }
     }
 
-    /// <summary>A package serverless build made — in any language — to publish as it is.</summary>
+    /// <summary>A package sw-serverless build made — in any language — to publish as it is.</summary>
     public class PublishPackageRequest
     {
         public string PackagePath { get; set; }
@@ -43,6 +43,9 @@ namespace SW.Serverless.Tooling
         public bool Promote { get; set; } = true;
         public string ReleaseNotes { get; set; }
         public string PublishedBy { get; set; }
+
+        /// <summary>The adapters' folder in storage, as hosts are configured with it; "adapters" unless set.</summary>
+        public string RemotePath { get; set; } = AdapterRepository.Root;
     }
 
     public class PublishResult
@@ -158,7 +161,7 @@ namespace SW.Serverless.Tooling
         }
 
         /// <summary>
-        /// Publishes a package serverless build made: its manifest is already complete, so this only
+        /// Publishes a package sw-serverless build made: its manifest is already complete, so this only
         /// settles the version, stamps it into the manifest and uploads. Always versioned; an adapter
         /// in another runtime goes only where hosts that can run it look.
         /// </summary>
@@ -179,7 +182,7 @@ namespace SW.Serverless.Tooling
                 System.IO.Compression.ZipFile.ExtractToDirectory(request.PackagePath, folder);
                 var manifestPath = Path.Combine(folder, AdapterManifest.FileName);
                 if (!File.Exists(manifestPath))
-                    throw new SWException($"{request.PackagePath} has no {AdapterManifest.FileName}; build it with serverless build.");
+                    throw new SWException($"{request.PackagePath} has no {AdapterManifest.FileName}; build it with sw-serverless build.");
 
                 var manifest = AdapterManifest.Parse(await File.ReadAllTextAsync(manifestPath));
                 var adapterId = manifest.Id?.ToLowerInvariant();
@@ -190,7 +193,7 @@ namespace SW.Serverless.Tooling
                 if (string.IsNullOrWhiteSpace(mode))
                     throw new SWException("The package has no version: give one with -v, or set version in adapter.json.");
 
-                var repository = new AdapterRepository(files, log);
+                var repository = new AdapterRepository(files, log, request.RemotePath);
                 var version = await repository.ResolveVersionAsync(adapterId, mode);
                 manifest.Version = version;
                 manifest.PublishedOn = DateTimeOffset.UtcNow;

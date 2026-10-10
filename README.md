@@ -1,387 +1,231 @@
+# SW-Serverless
 
-# SW.Serverless
-
-[![GitHub Actions](https://github.com/simplify9/SW-Serverless/actions/workflows/nuget-publish.yml/badge.svg)](https://github.com/simplify9/SW-Serverless/actions/workflows/nuget-publish.yml)
 [![NuGet - SimplyWorks.Serverless](https://img.shields.io/nuget/v/SimplyWorks.Serverless.svg)](https://www.nuget.org/packages/SimplyWorks.Serverless)
 [![NuGet - SimplyWorks.Serverless.Sdk](https://img.shields.io/nuget/v/SimplyWorks.Serverless.Sdk.svg)](https://www.nuget.org/packages/SimplyWorks.Serverless.Sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**SW.Serverless** is an open-source .NET framework for building and running serverless adapters and services. It provides a runtime environment for executing .NET applications as serverless functions with process isolation and communication through stdin/stdout.
+SW-Serverless runs small programs, called **adapters**, as separate child processes of a host
+application. The host installs an adapter from cloud storage by its id, starts it, calls its
+commands by name, and stops it. Adapters can be written in .NET, Python, JavaScript or TypeScript,
+or be any self-contained binary that speaks the protocol. The repository also has the tools to
+create, build, test, version and publish adapters: the `sw-serverless` command-line tool and the
+library behind it.
 
-## NuGet Packages
+## When to use it
 
-| Package | Version | Downloads |
-| ------- | ------- | --------- |
-| `SimplyWorks.Serverless` | [![NuGet](https://img.shields.io/nuget/v/SimplyWorks.Serverless.svg)](https://www.nuget.org/packages/SimplyWorks.Serverless) | [![Downloads](https://img.shields.io/nuget/dt/SimplyWorks.Serverless.svg)](https://www.nuget.org/packages/SimplyWorks.Serverless) |
-| `SimplyWorks.Serverless.Sdk` | [![NuGet](https://img.shields.io/nuget/v/SimplyWorks.Serverless.Sdk.svg)](https://www.nuget.org/packages/SimplyWorks.Serverless.Sdk) | [![Downloads](https://img.shields.io/nuget/dt/SimplyWorks.Serverless.Sdk.svg)](https://www.nuget.org/packages/SimplyWorks.Serverless.Sdk) |
+Use SW-Serverless when your application needs pieces of code that:
 
-## What's Included
+- are added or updated without redeploying the application: publish a new adapter version to
+  storage, and the host installs it the next time it is asked for;
+- must not take the application down when they fail, leak memory or hang: each adapter is its own
+  process, with timeouts, and resident adapters are supervised and restarted;
+- are written by other teams or partners, possibly in other languages, against a contract your
+  application defines.
 
-- **SW.Serverless**: Core serverless service library with dependency injection extensions for ASP.NET Core
-- **SW.Serverless.Sdk**: SDK for developing serverless adapters with the `Runner` class and logging utilities
-- **SW.Serverless.SampleWeb**: Example ASP.NET Core web application showing integration
-- **SW.Serverless.Installer**: Command-line tool for packaging and deploying adapters to cloud storage
+Typical examples are integrations with outside systems: one adapter per partner API, file format
+or message broker.
 
-## Quick Start
+It is not a general function-as-a-service platform. There is no HTTP gateway, autoscaling or
+multi-node scheduler: adapters run on the machine that runs the host.
 
-### Install NuGet Packages
+## The parts
 
-```bash
-dotnet add package SimplyWorks.Serverless
-dotnet add package SimplyWorks.Serverless.Sdk
+| Part | Package | What it is for |
+|---|---|---|
+| Host library | NuGet `SimplyWorks.Serverless` (`SW.Serverless`) | Add to the application that runs adapters: `AddServerless`, `IServerlessService`, `AddResidentAdapters`, `IResidentAdapterHost`. |
+| .NET SDK | NuGet `SimplyWorks.Serverless.Sdk` (`SW.Serverless.Sdk`) | Write an adapter in .NET: `Runner.Run`, `Runner.RunResident`, `Runner.Expect`. |
+| Python SDK | `sw-serverless` (`import sw_serverless`), in `sdk/python` | Write an adapter in Python 3.12 or later. No dependencies. |
+| Node SDK | `@simplyworks/sw-serverless`, in `sdk/node` | Write an adapter in JavaScript or TypeScript on Node 22 or later. No dependencies. |
+| Contract | NuGet `SimplyWorks.Serverless.Contract` (`SW.Serverless.Contract`) | The gRPC protocol (`adapter.proto`), the manifest (`adapter.json`) and catalog models. Shared by everything else. |
+| Tooling | NuGet `SimplyWorks.Serverless.Tooling` (`SW.Serverless.Tooling`) | What the CLI does, as a library: build, conformance tests, scaffolding, publishing. For an application that builds its own tools. |
+| CLI | `sw-serverless` (project `SW.Serverless.Installer`) | `init`, `build`, `test`, `run`, `manifest validate`, `publish`, `promote`, `versions`, `withdraw`. |
+
+The Python and Node SDKs are not on PyPI or npm yet. You do not need them there:
+`sw-serverless build` copies the SDK into every Python and Node package it builds. They will be
+published to PyPI and npm later.
+
+## Install the CLI
+
+Self-contained binaries are published on the
+[GitHub releases](https://github.com/simplify9/SW-Serverless/releases) tagged `cli-v<version>`, one
+per platform: `sw-serverless-<rid>.tar.gz` for `linux-x64`, `linux-arm64`, `linux-musl-x64`, `linux-musl-arm64`,
+`osx-x64` and `osx-arm64`, and `sw-serverless-win-x64.zip`, with a `SHA256SUMS` file. On Linux or
+macOS, the install script picks your platform, checks the download and installs to `~/.local/bin`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/simplify9/SW-Serverless/main/scripts/install-cli.sh | sh
 ```
 
-### Add to ASP.NET Core
+`INSTALL_DIR` changes where it goes; `SW_SERVERLESS_VERSION=10.2.0` picks a version. On Windows,
+download `sw-serverless-win-x64.zip` from the release and put `sw-serverless.exe` on your `PATH`.
 
-```csharp
-// In Startup.cs or Program.cs
-services.AddServerless();
+Or build it from source with the .NET 10 SDK:
+
+```sh
+dotnet run --project SW.Serverless.Installer -- <args>                 # run without installing
+dotnet publish SW.Serverless.Installer -c Release -o ./out              # ./out/sw-serverless
 ```
 
-### Create an Adapter
+See [docs/cli.md](docs/cli.md) for every command.
+
+## Quick start: an adapter
+
+`sw-serverless init` writes a small working adapter with two settings and two commands. The same
+five commands then build, check, call and publish it, whatever its language.
+
+```sh
+sw-serverless init Greeter                       # .NET; or --lang python, node, typescript
+cd Greeter
+sw-serverless build                              # -> bin/serverless/greeter-0.1.0.zip
+cp settings.example.json settings.json
+sw-serverless test --settings settings.json      # runs it as a host would and checks it
+sw-serverless run --settings settings.json --call Greet --input Ada
+# Hello, Ada!
+sw-serverless publish bin/serverless/greeter-0.1.0.zip -p local -b adapters-dev -u /tmp/swsl-store
+```
+
+`-p local` publishes to a folder, which is handy for trying things out. For S3, Azure, Google Cloud
+or Oracle storage, see [storage providers](docs/cli.md#storage).
+
+What `init` writes, in each language:
+
+**.NET** (`Program.cs`)
 
 ```csharp
 using SW.Serverless.Sdk;
 
-class Handler
+public class Adapter
 {
-    public async Task<string> ProcessData(string input)
+    public Adapter()
     {
-        // Your serverless logic here
-        return $"Processed: {input}";
+        // Declare settings here; read them in the commands, never in the constructor.
+        Runner.Expect("Greeting", "Hello", description: "What to say before the name.");
+        Runner.Expect("ApiKey", optional: true, isPrivate: true, description: "A key, to show how a secret is declared.");
     }
+
+    [AdapterCommand(Description = "Greets someone by name.")]
+    public Task<string> Greet(string name) =>
+        Task.FromResult($"{Runner.StartupValueOf("Greeting")}, {name}!");
 }
 
-class Program
+static class Program
 {
-    static async Task Main(string[] args) => await Runner.Run(new Handler());
+    static Task Main() => Runner.Run(new Adapter());
 }
 ```
 
-## Publishing Adapters (Installer)
+**Python** (`main.py`)
 
-`SW.Serverless.Installer` builds an adapter project (`dotnet publish -c Release`), zips the output and uploads it to the store the runtime installs adapters from. The executable is named `serverless`. From a checkout:
+```python
+import sw_serverless as sw
 
-```bash
-dotnet run --project SW.Serverless.Installer -- [options] <path/to/Adapter.csproj> <adapter-id>
+
+class Greeter:
+    def __init__(self):
+        sw.expect("Greeting", "Hello", description="What to say before the name.")
+        sw.expect("ApiKey", secret=True, required=False, description="A key, to show how a secret is declared.")
+
+    @sw.command("Greet", description="Greets someone by name.")
+    def greet(self, name: str) -> str:
+        return f"{sw.value_of('Greeting')}, {name}!"
+
+
+if __name__ == "__main__":
+    sw.run(Greeter)
 ```
 
-```bash
-# S3-compatible storage, next patch version
-serverless -p s3 -a <access-key> -s <secret> -b <bucket> -u https://s3.example.com \
-  -v patch ./MyAdapter/MyAdapter.csproj my.adapter
+**TypeScript** (`main.ts`; JavaScript is the same without the types, using `require`)
 
-# Credentials from the environment (CI)
-export SWSL_PROVIDER=s3 SWSL_ACCESS_KEY=... SWSL_SECRET_KEY=... SWSL_BUCKET=adapters SWSL_SERVICE_URL=https://s3.example.com
-serverless -v minor ./MyAdapter/MyAdapter.csproj my.adapter
+```ts
+import { expect, run, valueOf } from "@simplyworks/sw-serverless";
 
-# Oracle or Google Cloud: settings from a config file
-serverless -c cloudfiles.json -v 2.1.0 ./MyAdapter/MyAdapter.csproj my.adapter
-```
+class Greeter {
+  static commands = {
+    Greet: { method: "greet", input: "string", output: "string", description: "Greets someone by name." },
+  };
 
-| Flag | Meaning |
-|---|---|
-| `-p`, `--provider` | `s3`, `as` (Azure), `oc` (Oracle), `gc` (Google Cloud) or `local` (filesystem, for development) |
-| `-a`, `--accesskey` | Access key |
-| `-s`, `--secret` | Secret access key |
-| `-b`, `--bucketname` | Bucket name |
-| `-u`, `--url` | Service URL (for `local`, the storage folder) |
-| `-c`, `--cloudfilesconfigpath` | JSON config file (see below) |
-| `-v`, `--version` | `major`, `minor`, `patch`, or an explicit version such as `2.1.0` / `2.1.0-rc.1`. Omit to upload only `adapters/<id>`, as before (see Versions below) |
-| `-k`, `--kind` | Roles the adapter serves (e.g. `handler,mapper`), when it does not declare them with `[AdapterKind]` or in `adapter.json` |
+  constructor() {
+    expect("Greeting", { default: "Hello", description: "What to say before the name." });
+    expect("ApiKey", { secret: true, required: false, description: "A key, to show how a secret is declared." });
+  }
 
-The adapter id may contain only lowercase letters, digits, `.`, `_` and `-`, and must start with a letter or digit (uppercase input is lowercased).
-
-**Where settings come from.** Each setting is taken from the first of: the command-line flag, the config file, then the environment variable.
-
-| Environment variable | Setting |
-|---|---|
-| `SWSL_PROVIDER` | Provider |
-| `SWSL_ACCESS_KEY` | Access key |
-| `SWSL_SECRET_KEY` | Secret access key |
-| `SWSL_BUCKET` | Bucket name |
-| `SWSL_SERVICE_URL` | Service URL |
-| `SWSL_REGION` | Region |
-| `SWSL_PUBLISHED_BY` | Who is publishing, recorded in the catalog (then `GITHUB_ACTOR`, then the user name) |
-| `SWSL_GC_PROJECT_ID`, `SWSL_GC_PRIVATE_KEY_ID`, `SWSL_GC_PRIVATE_KEY`, `SWSL_GC_CLIENT_EMAIL`, `SWSL_GC_CLIENT_ID`, `SWSL_GC_CLIENT_X509_CERT_URL` | Google Cloud service account fields (`SWSL_GC_PRIVATE_KEY` may use literal `\n` for line breaks) |
-
-The config file holds the same settings under `CloudFiles`. Oracle settings (`Region`, `TenantId`, `UserId`, `FingerPrint`, `RSAKey`, `NamespaceName`) are read only from the file:
-
-```json
-{
-  "CloudFiles": {
-    "Provider": "gc",
-    "BucketName": "adapters",
-    "ProjectId": "my-project",
-    "PrivateKeyId": "…",
-    "PrivateKey": "-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----\n",
-    "ClientEmail": "publisher@my-project.iam.gserviceaccount.com",
-    "ClientId": "…"
+  greet(name: string): string {
+    return `${valueOf("Greeting")}, ${name}!`;
   }
 }
+
+run(Greeter);
 ```
 
-**What is uploaded.** The entry assembly is the project's real `AssemblyName` (checked to exist in the publish output). Every package carries an `adapter.json` manifest (below), and every upload carries metadata: `EntryAssembly`, `Lang`, `Timestamp`, `Lifecycle` and `Kind` (read from the assembly), `Sha256` and `Hash` (hex SHA-256 of the zip; `Hash` is what hosts name the extraction folder after — S3 keeps using its ETag), and `Version` (empty for an unversioned upload). A file that cannot be read fails the packaging rather than being left out.
+More in [docs/writing-adapters.md](docs/writing-adapters.md).
 
-The tool exits `0` only when the upload completed; a bad command line, an invalid adapter id, an invalid manifest, a failed build or a failed upload all exit non-zero.
+## Quick start: a host
 
-### Versions, promote and rollback
+Add the host library and a storage provider to your application:
 
-```bash
-# Publish 1.4.0 and make it the one that runs (the default)
-serverless -v 1.4.0 --notes "Retries on 503" ./MyAdapter/MyAdapter.csproj my.adapter
-
-# Publish without switching: stage it, check it, then promote
-serverless -v minor --no-promote ./MyAdapter/MyAdapter.csproj my.adapter
-serverless promote my.adapter 1.5.0
-
-# Roll back = promote an older version (no rebuild)
-serverless promote my.adapter 1.4.0
-
-# History, and taking a bad version out of use
-serverless versions my.adapter
-serverless withdraw my.adapter 1.5.0
+```sh
+dotnet add package SimplyWorks.Serverless
+dotnet add package SimplyWorks.CloudFiles.LocalTests.Extensions   # or .S3.Extensions, .AS.Extensions, ...
 ```
-
-The commands take the same storage flags, `-c` file and `SWSL_*` variables as publishing.
-
-| Flag | Meaning |
-|---|---|
-| `--no-promote` | With `-v`: upload the version and record it, but leave what runs alone |
-| `--notes "…"` | Release notes for this version (overrides `releaseNotes` in `adapter.json`) |
-| `--published-by` | Recorded in the catalog; defaults to `SWSL_PUBLISHED_BY`, then `GITHUB_ACTOR`, then the user name |
-| `--no-probe` | Do not start a classic adapter to ask which startup values it expects (see below) |
-
-- **Publish with `-v`** uploads the package to `adapters-versions/<id>/<version>` (immutable: an existing version is refused) and, unless `--no-promote`, the same package to `adapters/<id>` — the key every host runs — then records the version in the catalog. `major`, `minor` and `patch` bump the highest released version already published (or start at `1.0.0`); pre-release and other non-version keys are ignored when finding it. An explicit version must be higher than every released version.
-- **Publish without `-v`** works exactly as it always has: only `adapters/<id>` is written. The catalog's manifest follows it and its current version is cleared (an unversioned package is running); the version history is kept.
-- **`promote <id> <version>`** downloads the version, checks its SHA-256 against the one recorded when it was published, and copies it over `adapters/<id>` with the full metadata (including anything else the version carried, such as `Protocol`). A withdrawn or unknown version is refused.
-- **`withdraw <id> <version>`** marks the version withdrawn in the catalog: listed for history, refused by `promote`, not offered for pinning. The current version cannot be withdrawn — promote another first. The package itself stays, since a deployment may pin it.
-- **`versions <id>`** lists versions, newest first, with publish time, publisher, a short SHA-256, `*` for the current one and `withdrawn`. For an adapter published before the catalog it lists the packages instead.
-
-A host runs a specific version when asked for the adapter id `<id>/<version>`; a plain `<id>` runs whatever is current.
-
-### Storage layout
-
-| Key | What | Written by |
-|---|---|---|
-| `adapters/<id>` | The package that runs when no version is pinned, with the full metadata above | publish (unversioned, or `-v` without `--no-promote`), `promote` |
-| `adapters-versions/<id>/<version>` | One immutable package per version | publish with `-v` |
-| `adapters-catalog/<id>.json` | The catalog entry: current version, current manifest and SHA-256, the icon as a `data:` URI, and every version with its manifest, digest, time, publisher and withdrawn flag | every command but `versions` |
-| `adapters/<id>/<version>` | Where installers before the catalog put versions. Still read (`versions`, `promote`, pinned refs), never written | — |
-
-Versions and the catalog live **beside** `adapters/`, not under it: storage backed by a file system cannot keep `adapters/<id>` as a file and a folder at once, and hosts and Bitween builds older than the catalog treat every key under `adapters/` as an adapter. An adapter published by an older installer has no catalog entry until its next publish or promote, which create one from the packages and their metadata.
-
-### The adapter manifest (`adapter.json`)
-
-Put an `adapter.json` beside the project file to describe the adapter for a catalog or marketplace. It is optional: without one, the installer still writes a manifest into the package from what it can find out. The installer **merges** it: the author owns presentation, the installer owns the facts and overwrites them.
-
-```json
-{
-  "displayName": "Acme Carrier",
-  "summary": "Creates shipments and labels with Acme.",
-  "description": "Longer **Markdown** description.",
-  "publisher": { "name": "Simplify9", "url": "https://simplify9.com", "email": "support@simplify9.com" },
-  "license": "MIT",
-  "homepage": "https://example.com/acme",
-  "repository": "https://github.com/example/acme-adapter",
-  "icon": "assets/icon.png",
-  "tags": [ "shipping", "labels" ],
-  "categories": [ "Carriers" ],
-  "kinds": [ "handler" ],
-  "releaseNotes": "Retries on 503.",
-  "compatibility": { "minHostVersion": "10.0.0", "minBitweenVersion": "9.2.0" },
-  "properties": [
-    { "name": "BaseUrl", "displayName": "API URL", "type": "text", "default": "https://api.acme.test", "group": "Connection" },
-    { "name": "ApiKey", "type": "text", "required": true, "secret": true, "group": "Connection" },
-    { "name": "Mode", "type": "select", "options": [ "test", "live" ], "default": "test" }
-  ]
-}
-```
-
-| Field | Owner | Meaning |
-|---|---|---|
-| `manifestVersion` | installer | `1`; never lowered when an author file from a newer tool says more |
-| `id` | installer | The adapter id published |
-| `version` | installer | The version published; absent for an unversioned upload |
-| `displayName`, `summary`, `description` | author | Name, one line, longer Markdown |
-| `publisher` | author | `{ name, url, email }` |
-| `license`, `homepage`, `repository` | author | |
-| `icon` | author | PNG, JPEG or SVG **inside the package**, relative to its root — include it in the publish output (`CopyToPublishDirectory`). A missing file fails the publish; one of 64 KB or less is also inlined in the catalog as a `data:` URI |
-| `tags`, `categories` | author | Lists of strings |
-| `releaseNotes` | author / `--notes` | What changed in this version |
-| `kinds` | author | handler, mapper, receiver, validator… `--kind` wins over it; without either, the `[AdapterKind]` attributes in the assembly are used |
-| `runtime` | installer | `dotnet` |
-| `language` | author | Defaults from the project file: `csharp`, `fsharp` or `vb` |
-| `entry` | installer | The entry assembly |
-| `lifecycle` | installer | `classic` or `resident`, read from the assembly |
-| `protocol` | installer | `{ "min": 2, "max": 2 }` for resident adapters; absent for classic |
-| `sdkVersion` | installer | The `SimplyWorks.Serverless.Sdk` version it was built against |
-| `publishedOn` | installer | When it was published |
-| `compatibility` | author | `minHostVersion`, `minBitweenVersion` |
-| `properties` | author / probe | What has to be configured: `name`, `displayName`, `description`, `type` (`text`, `multiline`, `number`, `boolean`, `select`, `json`), `required`, `secret`, `default`, `options` (for `select`), `group` |
-
-Fields the installer does not know are kept and written back, so a manifest from a newer tool survives. The final manifest is validated (id and version format, paths inside the package, lifecycle, property names, types and duplicates) and a problem fails the publish before anything is uploaded.
-
-**Properties.** If `adapter.json` declares `properties`, those are used. Otherwise, for a classic adapter, the installer starts the built adapter the way a host does and asks it for its expected startup values (`Runner.Expect`): `required` is the inverse of optional, `secret` is private, and `default` and `description` are carried over. This runs the adapter's constructor on the build machine; `--no-probe` skips it. A probe that fails is a warning, not a failed publish — the manifest then lists no properties. Resident adapters are not probed.
-
-### Backward compatibility
-
-Ten production deployments run hosts on `SimplyWorks.Serverless` 10.0.x and Bitween builds that predate the catalog. What this installer writes is held to what they read:
-
-- `adapters/<id>` always holds the current package with the full metadata an old host needs (`EntryAssembly`, `Hash`, and everything it wrote before) — after a versioned publish, a promote, a rollback or an unversioned publish alike.
-- Nothing is ever written under `adapters/` except `adapters/<id>`, so an old Bitween listing sees exactly the adapters that exist.
-- Every existing command line works unchanged; without `-v` the upload is the same key with the same metadata, plus `adapter.json` inside the zip and an empty `Version`.
-- A package without `adapter.json`, and an adapter with no catalog entry, still install, run, list, and can be promoted.
-
-One limit: an old host asked for a pinned ref `<id>/<version>` looks only at `adapters/<id>/<version>`, so it cannot pin versions published by this installer (those are under `adapters-versions/`). Old hosts never used pinning; current hosts resolve pinned refs in both places.
-
-`SW.Serverless.CompatibilityTests` holds these to account: a host built on the published 10.0.0 package (`SW.Serverless.Compat.OldHost`) installs and runs what this installer publishes, through promote and rollback; the current host runs packages made the old way and adapters built on the published 10.0.0 SDK, classic and resident; the old Bitween listing rule sees nothing new; and manifests and catalog entries with unknown fields round-trip.
-
-## Resident Adapters
-
-A classic adapter is launched per invocation and exits when it returns. A **resident** adapter is
-launched once and stays running, so it can hold state — an open broker connection, a pooled HTTP/2
-channel, a warm cache — and push work into the host as well as receive it.
-
-```mermaid
-sequenceDiagram
-    participant H as Host
-    participant S as Cloud storage
-    participant A as Adapter process
-
-    H->>S: fetch + extract by adapter id
-    H->>A: launch, with memory and CPU ceilings
-    A->>H: dial back over UDS / named pipe (gRPC)
-    A->>H: Hello — commands, capabilities, SDK version
-
-    Note over H,A: process stays up
-
-    loop while running
-        H->>A: Invoke(command, argument)
-        A-->>H: result
-        A->>H: Publish(event)
-        H-->>A: accepted / rejected
-        H->>A: Ping
-        A-->>H: status, counters, last error
-    end
-
-    H->>A: Stop(drain)
-    A-->>H: finishes in flight, exits
-```
-
-The adapter dials **out** to the host over a Unix domain socket or a named pipe — nothing listens
-on a TCP port, and the adapter needs no inbound reachability.
-
-### Two directions
-
-| | |
-| --- | --- |
-| **Host → adapter** | `InvokeAsync<T>("Command", argument)` — any public `Task`/`Task<T>` method on the handler, discovered by reflection. |
-| **Adapter → host** | `context.PublishAsync(payload, dedupeKey, endpoint, …)` — the host persists, then answers accepted or rejected. The adapter acknowledges its source only after that. |
-
-### Writing one
 
 ```csharp
-using SW.Serverless.Sdk;
-using SW.Serverless.Sdk.Resident;
+using SW.CloudFiles.Extensions;
+using SW.PrimitiveTypes;
+using SW.Serverless;
+using SW.Serverless.Resident;
 
-class Handler : IResidentAdapter
+var builder = WebApplication.CreateBuilder(args);
+
+// Where adapters are published: the same store the CLI published to above.
+builder.Services.AddLocalTestsCloudFiles(o =>
 {
-    IAdapterContext _context;
-
-    public Task StartAsync(IAdapterContext context, CancellationToken ct)
-    {
-        _context = context;                       // connect, subscribe, warm up
-        return Task.CompletedTask;
-    }
-
-    public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
-
-    public Task<AdapterStatus> GetStatusAsync() =>
-        Task.FromResult(new AdapterStatus { Connected = true, State = "Ready" });
-
-    [AdapterCommand("What this command does.")]
-    public Task<object> GetStats() => Task.FromResult<object>(new { ok = true });
-}
-
-class Program
-{
-    static Task Main() => Runner.RunResident(new Handler());
-}
-```
-
-Host side:
-
-```csharp
-services.AddResidentAdapters<MyEventSink>(o =>
-{
-    o.HeartbeatInterval = TimeSpan.FromSeconds(15);
-    o.SoftMemoryLimitBytes = 512L * 1024 * 1024;
+    o.BucketName = "adapters-dev";
+    o.StoragePath = "/tmp/swsl-store";
 });
 
-var instance = await adapters.StartExclusiveAsync(new AdapterSpec
+builder.Services.AddServerless();
+// Needed for Python, Node and exec adapters, and for any resident adapter.
+builder.Services.AddResidentAdapters<IgnoreEvents>();
+
+var app = builder.Build();
+
+app.MapGet("/greet/{name}", async (string name, IServiceProvider services) =>
 {
-    AdapterId = "my.adapter",
-    InstanceKey = "1",
-    StartupValues = { ["Host"] = "broker.example.com" },
+    using var scope = services.CreateScope();          // the session ends with the scope
+    var serverless = scope.ServiceProvider.GetRequiredService<IServerlessService>();
+    await serverless.StartAsync("greeter", correlationId: Guid.NewGuid().ToString(),
+        new Dictionary<string, string> { ["Greeting"] = "Hi" });
+    return await serverless.InvokeAsync<string>("Greet", name);
 });
+
+app.Run();
+
+// Receives events that resident adapters publish. This one accepts and drops them.
+class IgnoreEvents : IAdapterEventSink
+{
+    public Task<EventOutcome> OnEventAsync(InboundEvent inboundEvent, CancellationToken cancellationToken) =>
+        Task.FromResult(EventOutcome.Ok("ignored"));
+}
 ```
 
-### Supervision
+The host machine needs the runtimes its adapters use on the `PATH`: `dotnet` for .NET adapters,
+`python3` (3.12 or later) for Python, `node` (22 or later) for JavaScript and TypeScript. More in
+[docs/hosting.md](docs/hosting.md).
 
-The host samples each adapter process on every heartbeat and acts on what it finds.
+## Documentation
 
-```mermaid
-flowchart LR
-    Sample[Heartbeat sample] --> Check{What did it find?}
-    Check -- healthy --> Sample
-    Check -- over soft memory or CPU --> Drain[Ask to drain, relaunch]
-    Check -- over hard memory --> Kill[Kill process tree, relaunch]
-    Check -- no answer --> Miss[Restart after N misses]
-    Drain --> Quarantine[Repeated crashes: quarantine]
-    Kill --> Quarantine
-    Miss --> Quarantine
-```
+- [Documentation index](docs/README.md)
+- [Concepts](docs/concepts.md): host, adapter, package, manifest, versions, lifecycles, protocols, contracts
+- [Hosting adapters](docs/hosting.md): the host library, sessions, resident adapters, limits, security
+- [Writing adapters](docs/writing-adapters.md): .NET, Python and Node side by side
+- [The CLI](docs/cli.md): every command, flag and environment variable
+- [The manifest](docs/manifest.md): `adapter.json`, field by field
+- [Packaging and storage](docs/packaging-and-storage.md): what a package holds and where it is stored
+- [Contracts](docs/contracts.md): defining what adapters for your application must do, and testing it
+- [The protocol](docs/protocol.md): for SDKs in other languages and `exec` adapters
+- [Extending the tools](docs/extending.md): your own CLI or server on `SW.Serverless.Tooling`
+- [Compatibility](docs/compatibility.md): what stays working across versions
 
-| Control | Effect |
-| --- | --- |
-| `SoftMemoryLimitBytes` | Asks the adapter to drain — in-flight work finishes, nothing is lost. |
-| `HardMemoryLimitBytes` | Kills the process tree, and is applied to the runtime as `DOTNET_GCHeapHardLimit`. |
-| `CpuPercentLimit` + `CpuLimitSamples` | Trips after N consecutive samples above the line, then asks to drain. The figure is a share of the whole machine, not of one core. |
-| `UpdateLimitsAsync` | Changes ceilings on a running adapter. Soft and CPU apply on the next sample; a hard-memory change reports `RestartRequired`. |
-| `RestartAsync` | Relaunches in place, keeping the instance key. |
+## License
 
-### Discovery
-
-Every public `Task`/`Task<T>` method on a handler is a command. The adapter reports them on attach,
-with the shape needed to call one:
-
-```csharp
-foreach (var c in adapters.Describe().Single(h => h.InstanceKey == "1").CommandDetails)
-    Console.WriteLine($"{c.Name}({c.ParameterType}) {c.ParameterSchema} — {c.Description}");
-```
-
-`ParameterSchema` lists a complex argument's properties as name → type, so a caller can build a form
-for a command it has not seen before.
-
-## Features
-
-- **Process Isolation**: Each adapter runs in its own process with timeout management
-- **Cloud Storage Integration**: Support for AWS S3, Azure Storage, and Oracle Cloud
-- **Dependency Injection**: Built-in integration with ASP.NET Core DI container
-- **Logging**: Structured logging support through `AdapterLogger`
-- **Caching**: Adapter metadata caching with configurable duration
-- **Version Management**: Semantic versioning support for adapter deployments
-
-## Architecture
-
-The framework consists of:
-
-1. **ServerlessService**: Manages adapter lifecycle, installation, and invocation
-2. **Runner**: Entry point for adapter applications with command processing
-3. **Installer**: CLI tool for building and deploying adapter packages
-4. **Cloud Storage**: Abstraction layer for different cloud storage providers
-
-## Support
-
-For issues, questions, or contributions, please visit the [GitHub repository](https://github.com/simplify9/SW-Serverless).
+MIT. See [LICENSE](LICENSE).

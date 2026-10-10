@@ -47,6 +47,62 @@ namespace SW.Serverless.Tooling
         /// assembly simply describes as a classic adapter with no declared kind — which is what
         /// every adapter was before any of this existed.
         /// </summary>
+        /// <summary>
+        /// A folder of the .NET runtime's own assemblies, for type and attribute references to
+        /// resolve against: this process's runtime when it runs from files, and otherwise — a
+        /// self-contained single-file build of the CLI has none on disk — an installed .NET, which a
+        /// .NET adapter needs to run anyway.
+        /// </summary>
+        internal static string RuntimeDirectory()
+        {
+            static bool Usable(string folder) => !string.IsNullOrEmpty(folder) && File.Exists(Path.Combine(folder, "System.Runtime.dll"));
+
+            // Empty in a single-file build, which is the case the fallbacks below are for.
+#pragma warning disable IL3000
+            var own = Path.GetDirectoryName(typeof(object).Assembly.Location);
+#pragma warning restore IL3000
+            if (Usable(own)) return own;
+
+            foreach (var root in new[]
+                     {
+                         Environment.GetEnvironmentVariable("DOTNET_ROOT"),
+                         OperatingSystem.IsWindows() ? @"C:\Program Files\dotnet" : "/usr/local/share/dotnet",
+                         "/usr/share/dotnet", "/usr/lib/dotnet",
+                     })
+            {
+                var shared = string.IsNullOrEmpty(root) ? null : Path.Combine(root, "shared", "Microsoft.NETCore.App");
+                if (shared == null || !Directory.Exists(shared)) continue;
+                var newest = Directory.GetDirectories(shared)
+                    .Where(Usable)
+                    .OrderByDescending(d => Version.TryParse(Path.GetFileName(d).Split('-')[0], out var v) ? v : new Version())
+                    .FirstOrDefault();
+                if (newest != null) return newest;
+            }
+
+            // Wherever the dotnet on the PATH keeps its runtimes.
+            try
+            {
+                using var dotnet = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("dotnet", "--list-runtimes")
+                {
+                    RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false,
+                });
+                var output = dotnet!.StandardOutput.ReadToEnd();
+                dotnet.WaitForExit();
+                return output.Split('\n')
+                    .Select(l => System.Text.RegularExpressions.Regex.Match(l, @"^Microsoft\.NETCore\.App (\S+) \[(.+)\]"))
+                    .Where(m => m.Success)
+                    .Select(m => (Version: Version.TryParse(m.Groups[1].Value.Split('-')[0], out var v) ? v : new Version(), Folder: Path.Combine(m.Groups[2].Value.Trim(), m.Groups[1].Value)))
+                    .Where(r => Usable(r.Folder))
+                    .OrderByDescending(r => r.Version)
+                    .Select(r => r.Folder)
+                    .FirstOrDefault();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         public static AdapterDescription Describe(string publishDirectory, string entryAssembly)
         {
             var description = new AdapterDescription();
@@ -57,9 +113,10 @@ namespace SW.Serverless.Tooling
                 if (!File.Exists(assemblyPath)) return description;
 
                 // Everything beside it, plus the runtime, so interface and attribute types resolve.
+                var runtime = RuntimeDirectory()
+                              ?? throw new InvalidOperationException("No .NET runtime found to read the adapter's types against.");
                 var assemblies = Directory.GetFiles(publishDirectory, "*.dll", SearchOption.AllDirectories)
-                    .Concat(Directory.GetFiles(
-                        Path.GetDirectoryName(typeof(object).Assembly.Location)!, "*.dll"))
+                    .Concat(Directory.GetFiles(runtime, "*.dll"))
                     .Distinct()
                     .ToList();
 

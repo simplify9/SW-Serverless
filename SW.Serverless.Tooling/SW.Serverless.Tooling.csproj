@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- What the serverless CLI does — building, describing, testing and publishing adapters — as
-       a library, so anything else that needs it (Bitween's server, a future code editor) calls the
+       a library, so anything else that needs it (an application's own CLI or server, a code editor) calls the
        same code the CLI does rather than shelling out to it. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -25,21 +25,23 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The manifest and catalog model, so what the tools write is exactly what hosts and Bitween read. -->
+    <!-- The manifest and catalog model, so what the tools write is exactly what hosts read. -->
     <ProjectReference Include="..\SW.Serverless.Contract\SW.Serverless.Contract.csproj" />
     <!-- The host itself, so the conformance kit runs an adapter exactly as a host would. -->
     <ProjectReference Include="..\SW.Serverless\SW.Serverless.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Contracts the kit knows by name. The Bitween one is copied from Bitween-api's
-         SW.Bitween.Adapters/Contract; once SimplyWorks.Bitween.Adapters is published, reference it
-         instead so the two can't drift. -->
-    <EmbeddedResource Include="Contracts/**/*.json" LogicalName="SW.Serverless.Tooling.Contracts.%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- What the build vendors into every Python and Node package: the SDK, from this repository,
+         so a build needs neither PyPI nor npm nor a network. Named by their path in the package.
+         An application's own packages are handed to the build in BuildRequest.Packages. -->
+    <EmbeddedResource Include="../sdk/python/src/sw_serverless/*.py" LogicalName="python/sw_serverless/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../sdk/node/package.json" LogicalName="node/@simplyworks/sw-serverless/package.json" />
+    <EmbeddedResource Include="../sdk/node/src/*.js;../sdk/node/src/*.d.ts" LogicalName="node/@simplyworks/sw-serverless/src/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="serverless" />
+    <InternalsVisibleTo Include="sw-serverless" />
     <InternalsVisibleTo Include="SW.Serverless.Installer.UnitTests" />
     <InternalsVisibleTo Include="SW.Serverless.CompatibilityTests" />
   </ItemGroup>

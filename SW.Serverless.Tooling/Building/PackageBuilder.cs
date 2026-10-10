@@ -29,6 +29,29 @@ namespace SW.Serverless.Tooling.Building
 
         public Runtimes.AdapterRuntimeOptions Runtimes { get; set; } = new();
         public Action<string> Log { get; set; } = _ => { };
+
+        /// <summary>
+        /// Packages to vendor beside the SDK, from files rather than PyPI or npm: what an
+        /// application's own CLI adds — the types of its contract, say. Ignored for .NET, whose
+        /// packages come from NuGet.
+        /// </summary>
+        public IList<VendoredPackage> Packages { get; set; } = new List<VendoredPackage>();
+    }
+
+    /// <summary>A package the build writes into a Python or Node package itself, rather than fetching.</summary>
+    public class VendoredPackage
+    {
+        /// <summary>python or node.</summary>
+        public string Runtime { get; set; }
+
+        /// <summary>
+        /// Its name as requirements.txt or package.json would give it — acme-orders,
+        /// @acme/orders — so naming it there doesn't send the build to fetch it.
+        /// </summary>
+        public string Name { get; set; }
+
+        /// <summary>Its files, keyed by path under _vendor/ (Python) or node_modules/ (Node).</summary>
+        public IDictionary<string, byte[]> Files { get; set; } = new Dictionary<string, byte[]>();
     }
 
     public class BuildResult
@@ -46,7 +69,7 @@ namespace SW.Serverless.Tooling.Building
     }
 
     /// <summary>
-    /// What serverless build does, for an adapter in any language its SDK supports: builds it,
+    /// What sw-serverless build does, for an adapter in any language its SDK supports: builds it,
     /// asks it to describe itself, writes its manifest from that and the author's adapter.json,
     /// carries its source under the source rules, and zips the result into a package any host runs.
     /// </summary>
@@ -67,7 +90,7 @@ namespace SW.Serverless.Tooling.Building
             var authorPath = Path.Combine(project, AdapterManifest.FileName);
             if (!File.Exists(authorPath))
             {
-                result.Problems.Add($"there is no {AdapterManifest.FileName} in {project}; serverless init writes one");
+                result.Problems.Add($"there is no {AdapterManifest.FileName} in {project}; sw-serverless init writes one");
                 return result;
             }
             var authorJson = await File.ReadAllTextAsync(authorPath);
@@ -79,9 +102,19 @@ namespace SW.Serverless.Tooling.Building
             }
 
             var runtime = string.IsNullOrWhiteSpace(author.Runtime) ? AdapterManifest.DotnetRuntime : author.Runtime;
+            if (string.Equals(runtime, AdapterManifest.PythonRuntime, StringComparison.OrdinalIgnoreCase))
+            {
+                await PythonBuild.BuildAsync(request, project, author, result);
+                return result;
+            }
+            if (string.Equals(runtime, AdapterManifest.NodeRuntime, StringComparison.OrdinalIgnoreCase))
+            {
+                await NodeBuild.BuildAsync(request, project, author, result);
+                return result;
+            }
             if (!string.Equals(runtime, AdapterManifest.DotnetRuntime, StringComparison.OrdinalIgnoreCase))
             {
-                result.Problems.Add($"building a '{runtime}' adapter arrives with that language's SDK; this build does .NET");
+                result.Problems.Add($"building a '{runtime}' adapter arrives with that language's SDK; this build does .NET, Python and Node");
                 return result;
             }
 
@@ -123,8 +156,8 @@ namespace SW.Serverless.Tooling.Building
                 AdapterManifest.DotnetRuntime, request.Runtimes);
             if (description == null)
             {
-                result.Problems.Add($"{problem}. serverless build needs SimplyWorks.Serverless.Sdk 10.1.0 or later; " +
-                                    "an adapter on an older SDK is published with serverless <project> <id> as before");
+                result.Problems.Add($"{problem}. sw-serverless build needs SimplyWorks.Serverless.Sdk 10.1.0 or later; " +
+                                    "an adapter on an older SDK is published with sw-serverless <project> <id> as before");
                 return result;
             }
             result.Warnings.AddRange(description.Warnings);
@@ -137,7 +170,7 @@ namespace SW.Serverless.Tooling.Building
                 manifest.Source = new AdapterSource
                 {
                     BuildCommand = "dotnet publish -c Release",
-                    Lockfiles = source.Keys.Where(k => Lockfiles.Contains(Path.GetFileName(k), StringComparer.OrdinalIgnoreCase)).OrderBy(k => k).ToList(),
+                    Lockfiles = source.Keys.Where(IsLockfile).OrderBy(k => k).ToList(),
                 };
                 foreach (var (relative, absolute) in source.OrderBy(s => s.Key, StringComparer.Ordinal))
                 {
@@ -216,6 +249,9 @@ namespace SW.Serverless.Tooling.Building
             return manifest;
         }
 
+        internal static bool IsLockfile(string path) =>
+            Lockfiles.Contains(Path.GetFileName(path), StringComparer.OrdinalIgnoreCase);
+
         /// <summary>
         /// Whether the author's own adapter.json says "lifecycle": "classic" — read from the file,
         /// since the model fills in classic when nothing is said.
@@ -235,11 +271,13 @@ namespace SW.Serverless.Tooling.Building
         /// The source to carry, keyed by its path in the package's source folder: the project and
         /// the local projects it references, under the ignore rules, scanned for secrets.
         /// </summary>
-        static Dictionary<string, string> CollectSource(string project, string projectFile, BuildRequest request, BuildResult result)
+        internal static Dictionary<string, string> CollectSource(string project, string projectFile, BuildRequest request, BuildResult result)
         {
             var roots = new List<string> { project };
-            foreach (var referenced in LocalReferences(projectFile, new HashSet<string>(StringComparer.Ordinal)))
-                if (!roots.Contains(referenced)) roots.Add(referenced);
+            // A .NET project's local project references come along; other languages have none to follow.
+            if (projectFile != null)
+                foreach (var referenced in LocalReferences(projectFile, new HashSet<string>(StringComparer.Ordinal)))
+                    if (!roots.Contains(referenced)) roots.Add(referenced);
 
             var common = CommonAncestor(roots);
             var repository = RepositoryRoot(project);

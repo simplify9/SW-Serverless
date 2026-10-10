@@ -8,7 +8,7 @@ using SW.Serverless.Tooling;
 namespace SW.Serverless.CompatibilityTests;
 
 /// <summary>
-/// (d) Bitween builds older than the catalog list adapters by listing storage. Whatever the current
+/// (d) Applications older than the catalog list adapters by listing storage. Whatever the current
 /// installer writes must look to them like exactly the adapters that exist — no catalog file, no
 /// version folder, no stray id.
 /// </summary>
@@ -17,14 +17,14 @@ public class OldListingTests
 {
     const string Sample = "SW.Serverless.Samples.Classic";
 
-    /// <summary>Bitween's Semver.IsVersionNumber, as shipped.</summary>
+    /// <summary>The version test deployed listings use, as shipped.</summary>
     static bool IsVersionNumber(string text) => Regex.IsMatch(text, @"^\d+\.\d+\.\d+(-\S+)?$");
 
     /// <summary>
-    /// The grouping in Bitween's AdapterListing and Search handlers, copied as shipped: non-empty
+    /// The grouping deployed listings use, copied as shipped: non-empty
     /// keys, a semver last segment grouped under the segment before it, anything else an adapter id.
     /// </summary>
-    static async Task<Dictionary<string, List<string>>> OldBitweenListAsync(ICloudFilesService files, string prefix)
+    static async Task<Dictionary<string, List<string>>> OldListingAsync(ICloudFilesService files, string prefix)
     {
         var index = "adapters".Length + 1;
         return (await files.ListAsync(prefix))
@@ -41,10 +41,10 @@ public class OldListingTests
     }
 
     [TestMethod]
-    public async Task Old_bitween_sees_exactly_the_adapter_after_versions_promote_and_withdraw()
+    public async Task An_old_listing_sees_exactly_the_adapter_after_versions_promote_and_withdraw()
     {
         using var bucket = new Bucket();
-        // Named by the old convention, so both of old Bitween's listings — by convention prefix,
+        // Named by the old convention, so both of the old listings — by convention prefix,
         // and everything under adapters/ — are exercised.
         const string id = "infolink6.handlers.compat";
 
@@ -57,9 +57,9 @@ public class OldListingTests
 
         foreach (var prefix in new[] { "adapters/", "adapters/infolink6.handlers" })
         {
-            var listed = await OldBitweenListAsync(bucket.Files, prefix);
+            var listed = await OldListingAsync(bucket.Files, prefix);
             CollectionAssert.AreEqual(new[] { id }, listed.Keys.ToList(), $"listing {prefix}");
-            Assert.AreEqual(0, listed[id].Count, "no version is under adapters/ for old Bitween to offer");
+            Assert.AreEqual(0, listed[id].Count, "no version is under adapters/ for an old listing to offer");
         }
 
         CollectionAssert.AreEqual(new[] { $"adapters/{id}" }, await bucket.KeysAsync("adapters/"),

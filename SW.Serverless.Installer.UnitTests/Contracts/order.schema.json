@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Order",
+  "type": "object",
+  "required": ["OrderId"],
+  "properties": {
+    "OrderId": { "type": "string" },
+    "Lines": { "type": "integer" }
+  },
+  "additionalProperties": true
+}

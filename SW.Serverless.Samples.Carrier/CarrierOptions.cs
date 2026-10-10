@@ -1,6 +1,6 @@
 namespace SW.Serverless.Samples.Carrier
 {
-    /// <summary>Bound straight from startup values — the same keys a Traxis agent's Settings hold.</summary>
+    /// <summary>Bound straight from startup values — the same keys a host's adapter settings hold.</summary>
     public class CarrierOptions
     {
         /// <summary>The carrier's gRPC endpoint.</summary>

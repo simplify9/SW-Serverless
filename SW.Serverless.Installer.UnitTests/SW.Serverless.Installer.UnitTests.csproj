@@ -22,9 +22,9 @@
       <ProjectReference Include="..\SW.Serverless.Installer\SW.Serverless.Installer.csproj" />
       <!-- Build order only: these are READ as assemblies, to prove the describer reads a real
            adapter rather than a hand-made fixture. -->
-      <ProjectReference Include="..\SW.Serverless.UnitTests.BitweenHandler\SW.Serverless.UnitTests.BitweenHandler.csproj"
+      <ProjectReference Include="..\SW.Serverless.UnitTests.OrdersProcessor\SW.Serverless.UnitTests.OrdersProcessor.csproj"
                         ReferenceOutputAssembly="false" />
-      <ProjectReference Include="..\SW.Serverless.UnitTests.BitweenReceiver\SW.Serverless.UnitTests.BitweenReceiver.csproj"
+      <ProjectReference Include="..\SW.Serverless.UnitTests.OrdersSource\SW.Serverless.UnitTests.OrdersSource.csproj"
                         ReferenceOutputAssembly="false" />
       <ProjectReference Include="..\SW.Serverless.Compat.ClassicV10\SW.Serverless.Compat.ClassicV10.csproj"
                         ReferenceOutputAssembly="false" />
@@ -33,5 +33,10 @@
       <ProjectReference Include="..\SW.Serverless.Samples.Classic\SW.Serverless.Samples.Classic.csproj"
                         ReferenceOutputAssembly="false" />
     </ItemGroup>
+
+  <ItemGroup>
+    <!-- The sample "orders" contract the conformance tests check adapters against. -->
+    <None Update="Contracts/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
 </Project>

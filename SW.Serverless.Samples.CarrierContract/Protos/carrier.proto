@@ -3,7 +3,7 @@ syntax = "proto3";
 option csharp_namespace = "SW.Serverless.Samples.CarrierContract";
 package sw.samples.carrier.v1;
 
-// A stand-in for a real carrier's API — the kind of upstream a Traxis agent adapter talks to.
+// A stand-in for a real carrier's API — the kind of upstream a carrier adapter talks to.
 // It belongs to the CARRIER, not to SW.Serverless: the adapter's job is to translate between
 // this and whatever the host's own SDK defines.
 service Carrier {

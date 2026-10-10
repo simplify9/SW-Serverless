@@ -6,7 +6,7 @@ namespace SW.Serverless.Resident
 {
     /// <summary>
     /// Adapter-reported metrics republished on System.Diagnostics.Metrics, so they export
-    /// wherever the host already exports (design doc 6.3).
+    /// wherever the host already exports.
     /// </summary>
     public static class AdapterMetrics
     {

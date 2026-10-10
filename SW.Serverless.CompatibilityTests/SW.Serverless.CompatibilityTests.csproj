@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <!-- Backward compatibility with what is already deployed: hosts on SimplyWorks.Serverless
-         10.0.x, older Bitween builds, and adapters built against the published SDK. Each old side is
+         10.0.x, older applications that list storage, and adapters built against the published SDK. Each old side is
          the PUBLISHED package, never this repository's project. -->
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>

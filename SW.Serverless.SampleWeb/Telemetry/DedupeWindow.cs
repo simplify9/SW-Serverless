@@ -5,7 +5,7 @@ using System.Threading;
 namespace SW.Serverless.SampleWeb.Telemetry
 {
     /// <summary>
-    /// A dedupe table with a retention window, which is the shape a real one has too. Bitween keeps
+    /// A dedupe table with a retention window, which is the shape a real one has too. A real host keeps
     /// this in the database with a pruning job; a sample keeps it in memory — but not for ever, or a
     /// long-lived host with a steady stream of distinct keys simply grows until it dies.
     ///

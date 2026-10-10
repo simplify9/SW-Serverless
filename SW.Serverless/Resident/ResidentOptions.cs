@@ -20,14 +20,14 @@ namespace SW.Serverless.Resident
         /// <summary>Missed heartbeats before the supervisor restarts the instance.</summary>
         public int MissedHeartbeatsBeforeRestart { get; set; } = 3;
 
-        /// <summary>Stderr lines kept per instance for crash forensics (design doc 6.7).</summary>
+        /// <summary>Stderr lines kept per instance for crash forensics.</summary>
         public int DiagnosticBufferLines { get; set; } = 200;
 
         /// <summary>Restarts allowed inside CrashLoopWindow before the instance is quarantined.</summary>
         public int CrashLoopThreshold { get; set; } = 5;
         public TimeSpan CrashLoopWindow { get; set; } = TimeSpan.FromMinutes(5);
 
-        /// <summary>Soft RSS ceiling; the watchdog asks the adapter to drain (design doc 11.1).</summary>
+        /// <summary>Soft RSS ceiling; the watchdog asks the adapter to drain.</summary>
         public long SoftMemoryLimitBytes { get; set; } = 0;
         public long HardMemoryLimitBytes { get; set; } = 0;
 

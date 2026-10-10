@@ -15,17 +15,14 @@ using System.Threading.Tasks;
 
 namespace SW.Serverless.Installer
 {
-    /// <summary><c>serverless init &lt;name&gt;</c></summary>
+    /// <summary><c>sw-serverless init &lt;name&gt;</c></summary>
     public class InitCliOptions
     {
         [Value(0, Required = true, MetaName = "name", HelpText = "The adapter's name, e.g. AcmeOrders: its folder, project and class.")]
         public string Name { get; set; }
 
-        [Option("lang", Default = "dotnet", HelpText = "Its language: dotnet. Python, Node and Go arrive with their SDKs.")]
+        [Option("lang", Default = "dotnet", HelpText = "Its language: dotnet, python, node (JavaScript) or typescript.")]
         public string Language { get; set; }
-
-        [Option("kind", Default = "handler", HelpText = "handler, mapper, validator or receiver.")]
-        public string Kind { get; set; }
 
         [Option("id", HelpText = "Its id in storage; derived from the name when not given (AcmeOrders -> acme.orders).")]
         public string Id { get; set; }
@@ -34,7 +31,7 @@ namespace SW.Serverless.Installer
         public string Directory { get; set; }
     }
 
-    /// <summary><c>serverless build [project]</c></summary>
+    /// <summary><c>sw-serverless build [project]</c></summary>
     public class BuildCliOptions
     {
         [Value(0, MetaName = "project", Default = ".", HelpText = "The adapter's project folder, with its adapter.json.")]
@@ -46,14 +43,14 @@ namespace SW.Serverless.Installer
         [Option("no-source", HelpText = "Leave the source out of the package.")]
         public bool NoSource { get; set; }
 
-        [Option("allow", HelpText = "A source file whose secret-scan finding is a false positive. Repeat for more.")]
+        [Option("allow", HelpText = "Source files whose secret-scan findings are false positives, separated by spaces.")]
         public IEnumerable<string> Allow { get; set; }
 
         [Option("dry-run", HelpText = "Show the source that would be carried, and build nothing.")]
         public bool DryRun { get; set; }
     }
 
-    /// <summary><c>serverless test [package]</c></summary>
+    /// <summary><c>sw-serverless test [package]</c></summary>
     public class TestCliOptions
     {
         [Value(0, MetaName = "package", Default = ".",
@@ -66,14 +63,14 @@ namespace SW.Serverless.Installer
         [Option("allow-delete", HelpText = "Let a receiver's DeleteFile run: it removes or moves a real file at the source.")]
         public bool AllowDelete { get; set; }
 
-        [Option("contract", HelpText = "A contract file to check against, beyond those the CLI carries. Repeat for more.")]
+        [Option("contract", HelpText = "Contract files to check against, separated by spaces.")]
         public IEnumerable<string> Contracts { get; set; }
 
         [Option("timeout", Default = 60, HelpText = "Seconds one call may take.")]
         public int Timeout { get; set; }
     }
 
-    /// <summary><c>serverless run [package] --call Command</c></summary>
+    /// <summary><c>sw-serverless run [package] --call Command</c></summary>
     public class RunCliOptions
     {
         [Value(0, MetaName = "package", Default = ".", HelpText = "A package zip, a package folder, or a project folder (built first).")]
@@ -92,7 +89,7 @@ namespace SW.Serverless.Installer
         public int Timeout { get; set; }
     }
 
-    /// <summary><c>serverless manifest validate [path]</c></summary>
+    /// <summary><c>sw-serverless manifest validate [path]</c></summary>
     public class ManifestCliOptions
     {
         [Value(0, Required = true, MetaName = "action", HelpText = "validate")]
@@ -102,10 +99,10 @@ namespace SW.Serverless.Installer
         public string Path { get; set; }
     }
 
-    /// <summary><c>serverless publish &lt;package&gt;</c></summary>
+    /// <summary><c>sw-serverless publish &lt;package&gt;</c></summary>
     public class PublishPackageCliOptions : StorageCliOptions
     {
-        [Value(0, Required = true, MetaName = "package", HelpText = "A package zip from serverless build.")]
+        [Value(0, Required = true, MetaName = "package", HelpText = "A package zip from sw-serverless build.")]
         public string Package { get; set; }
 
         [Option('v', "version", HelpText = "The version: explicit, or major, minor or patch to bump. The manifest's version unless set.")]
@@ -134,7 +131,6 @@ namespace SW.Serverless.Installer
                 Name = opts.Name,
                 Id = opts.Id,
                 Language = opts.Language,
-                Kind = opts.Kind,
                 ParentDirectory = opts.Directory,
             });
             if (!result.Succeeded)
@@ -143,9 +139,9 @@ namespace SW.Serverless.Installer
                 return Task.FromResult(Failure);
             }
 
-            Console.WriteLine($"Made a {opts.Kind} adapter in {result.ProjectDirectory}:");
+            Console.WriteLine($"Made an adapter in {result.ProjectDirectory}:");
             foreach (var file in result.Files) Console.WriteLine($"  {file}");
-            Console.WriteLine("Next: serverless build, then serverless test --settings settings.json");
+            Console.WriteLine("Next: sw-serverless build, then sw-serverless test --settings settings.json");
             return Task.FromResult(Success);
         }
 
@@ -177,6 +173,17 @@ namespace SW.Serverless.Installer
 
         public static async Task<int> Test(TestCliOptions opts)
         {
+            List<ContractDocument> contracts;
+            try
+            {
+                contracts = (opts.Contracts ?? Enumerable.Empty<string>()).Select(ContractDocument.FromFile).ToList();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Newtonsoft.Json.JsonException)
+            {
+                Console.WriteLine($"The contract couldn't be read: {ex.Message}");
+                return Failure;
+            }
+
             var (package, cleanup) = await PackageFolderAsync(opts.Package);
             if (package == null) return Failure;
             try
@@ -186,7 +193,7 @@ namespace SW.Serverless.Installer
                     PackageDirectory = package,
                     Settings = ReadSettings(opts.Settings),
                     AllowDelete = opts.AllowDelete,
-                    Contracts = (opts.Contracts ?? Enumerable.Empty<string>()).Select(ContractDocument.FromFile).ToList(),
+                    Contracts = contracts,
                     CommandTimeoutSeconds = opts.Timeout,
                     Log = Console.WriteLine,
                 });
@@ -285,7 +292,7 @@ namespace SW.Serverless.Installer
                 return (folder, () => TryDelete(folder));
             }
 
-            if (Directory.Exists(path) && Directory.GetFiles(path, "*.*proj").Length > 0)
+            if (Directory.Exists(path) && (Directory.GetFiles(path, "*.*proj").Length > 0 || IsUnbuiltScript(path)))
             {
                 var output = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "swsl-cli", Guid.NewGuid().ToString("N"));
                 var built = await PackageBuilder.BuildAsync(new BuildRequest { ProjectDirectory = path, OutputDirectory = output, Log = Console.WriteLine });
@@ -298,6 +305,29 @@ namespace SW.Serverless.Installer
 
             Console.WriteLine($"{given} is neither a package zip, a package folder nor a project folder");
             return (null, () => { });
+        }
+
+        /// <summary>
+        /// A Python or Node project rather than a built package: its manifest names the runtime, and
+        /// nothing a build writes is there — the Python entry, or the SDK in node_modules.
+        /// </summary>
+        static bool IsUnbuiltScript(string folder)
+        {
+            var manifestPath = System.IO.Path.Combine(folder, AdapterManifest.FileName);
+            if (!File.Exists(manifestPath)) return false;
+            try
+            {
+                var runtime = AdapterManifest.Parse(File.ReadAllText(manifestPath)).Runtime;
+                if (string.Equals(runtime, AdapterManifest.PythonRuntime, StringComparison.OrdinalIgnoreCase))
+                    return !File.Exists(System.IO.Path.Combine(folder, PythonBuild.EntryScript));
+                if (string.Equals(runtime, AdapterManifest.NodeRuntime, StringComparison.OrdinalIgnoreCase))
+                    return !File.Exists(System.IO.Path.Combine(folder, "node_modules", "@simplyworks", "sw-serverless", "package.json"));
+                return false;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
         }
 
         static IDictionary<string, string> ReadSettings(string path)

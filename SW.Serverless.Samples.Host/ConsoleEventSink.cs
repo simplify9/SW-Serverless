@@ -8,8 +8,8 @@ using System.Threading.Tasks;
 namespace SW.Serverless.Samples.Host
 {
     /// <summary>
-    /// Stands in for Bitween's ingest path. In the real host this persists an Xchange, writes the
-    /// payload to cloud storage, commits, and returns the Xchange id — and only then does the
+    /// Stands in for an application's ingest path. A real host persists the message, writes the
+    /// payload to cloud storage, commits, and returns its id — and only then does the
     /// adapter acknowledge its broker.
     /// </summary>
     public class ConsoleEventSink : IAdapterEventSink
@@ -57,7 +57,7 @@ namespace SW.Serverless.Samples.Host
         /// Keys expire rather than accumulating for the process lifetime — this host runs
         /// indefinitely, and a steady stream of distinct keys would otherwise grow until it dies.
         /// The window has to cover the source's redelivery horizon; a real host would keep this in
-        /// a database with a pruning job, which is exactly what Bitween does.
+        /// a database with a pruning job, as integration platforms do.
         /// </summary>
         static class Seen
         {

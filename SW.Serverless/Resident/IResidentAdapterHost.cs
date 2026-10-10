@@ -23,7 +23,7 @@ namespace SW.Serverless.Resident
 
     /// <summary>
     /// Owns every long-lived adapter process on this node. Registered as a SINGLETON — a request
-    /// scope ending must never kill a broker connection (design doc 4).
+    /// scope ending must never kill a broker connection.
     /// </summary>
     public interface IResidentAdapterHost
     {
@@ -49,7 +49,7 @@ namespace SW.Serverless.Resident
         /// <summary>
         /// Relaunches an instance in place, keeping its registry entry — so a lease, a data source,
         /// or anything else holding the key still points at it afterwards. Stopping and starting
-        /// instead drops the entry, which in Bitween's case would release the broker lease that
+        /// instead drops the entry, which for a host that leases connections would release the lease that
         /// makes the connection exclusive.
         /// </summary>
         Task<ResidentAdapterInstance> RestartAsync(string adapterId, string instanceKey,
@@ -58,7 +58,7 @@ namespace SW.Serverless.Resident
         /// <summary>
         /// Check out one warm instance from a pool of stateless workers. Replaces a per-invocation
         /// process spawn. Only for adapters declaring Poolable — a process-static field would
-        /// otherwise leak across sessions (design doc 14.5).
+        /// otherwise leak across sessions.
         /// </summary>
         Task<IAdapterLease> RentAsync(AdapterSpec spec, CancellationToken cancellationToken = default);
 

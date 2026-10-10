@@ -26,7 +26,7 @@ jobs:
         SW.Serverless.Sdk/SW.Serverless.Sdk.csproj
         SW.Serverless.Tooling/SW.Serverless.Tooling.csproj
       major-version: '10'
-      minor-version: '1'
+      minor-version: '2'
       dotnet-version: '10.0.x'
       run-tests: true
       test-projects: '**/*UnitTests/*.csproj'

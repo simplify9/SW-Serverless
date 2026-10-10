@@ -300,7 +300,7 @@ namespace SW.Serverless.UnitTests
 
         /// <summary>
         /// Restarting keeps the instance in place under the same key. That matters beyond
-        /// tidiness: in Bitween the key is the data source, and dropping the registry entry would
+        /// tidiness: a host may key an instance by the connection it holds, and dropping the registry entry would
         /// release the lease that makes the broker connection exclusive — so a restart would
         /// briefly become a handover.
         /// </summary>

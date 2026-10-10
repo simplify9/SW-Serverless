@@ -10,7 +10,7 @@ namespace SW.Serverless.Resident
 {
     /// <summary>
     /// Spawns an adapter as a local child process and hands it the handshake on stdin.
-    /// Runtime tuning is applied through environment variables — design doc 11.1.
+    /// Runtime tuning is applied through environment variables.
     /// </summary>
     internal class AdapterProcessLauncher
     {
@@ -111,7 +111,7 @@ namespace SW.Serverless.Resident
 
         /// <summary>
         /// One file write that converts the worst outage mode into a supervised restart: under
-        /// memory pressure the kernel kills an adapter rather than the host (design doc 11.2).
+        /// memory pressure the kernel kills an adapter rather than the host.
         /// </summary>
         static void ApplyUnixHardening(Process process, AdapterSpec spec)
         {

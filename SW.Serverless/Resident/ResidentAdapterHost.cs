@@ -194,7 +194,7 @@ namespace SW.Serverless.Resident
             spec.AdapterValues = supervised.RequestedAdapterValues;
 
             // Resolves an explicit path, or installs from cloud storage — which is what makes
-            // "add a provider without redeploying" real (design doc 15.2).
+            // "add a provider without redeploying" real.
             var resolved = await locator.ResolveAsync(spec, cancellationToken);
             spec.EntryAssemblyPath = resolved.EntryAssemblyPath;
             spec.Executable = resolved.Executable ?? spec.Executable;
@@ -414,7 +414,7 @@ namespace SW.Serverless.Resident
             // Relaunch in place: the entry stays in the registry under the same key, so whatever
             // owns this instance — a lease, a data source, a caller holding the key — still points
             // at it afterwards. Stopping and starting instead would drop the entry and, in
-            // Bitween's case, release the broker lease that makes the connection exclusive.
+            // the case of a host that leases connections, release the lease that makes the connection exclusive.
             //
             // Stopping is set for the teardown so the exit does not look like a crash and trigger
             // the backoff restart; this method does the relaunch itself.
@@ -698,7 +698,7 @@ namespace SW.Serverless.Resident
             if (instance.State != InstanceState.Ready) return;
 
             // Host-observed metrics need no adapter cooperation, so they still work when the
-            // adapter is wedged (design doc 6.3).
+            // adapter is wedged.
             SampleProcess(supervised, instance);
 
             try
