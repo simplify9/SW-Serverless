@@ -420,7 +420,14 @@ Notes:
 - The CPU figure is a share of the whole machine. On a 16-core machine one busy core is about 6%.
 - The hard memory limit is also given to the runtime: `DOTNET_GCHeapHardLimit` for .NET and
   `--max-old-space-size` for Node, so an allocation past it fails inside the adapter. Python has no
-  such setting; only the host's kill applies.
+  such setting; the host passes it as `SW_SERVERLESS_MEMORY_LIMIT_BYTES`, and from SDK 10.2.1 the
+  Python SDK sets it as `RLIMIT_DATA` on Linux, so an allocation past it raises `MemoryError`.
+  Elsewhere (macOS, Windows), and for older SDKs, only the host's kill applies. Without a hard
+  limit the variable is not set.
+- A call cut short because the host stopped the adapter (a memory or CPU limit, or missed
+  heartbeats) fails with `AdapterStoppedException`, an `IOException` whose message says which
+  limit, e.g. `Adapter 'acme.orders/1.0.0' stopped: it was using 167 MB, over its memory limit of
+  150 MB, and was killed.` `ResidentAdapterInstance.StopReason` keeps the reason.
 - On Linux the host sets each adapter's `oom_score_adj` to 500, so under memory pressure the kernel
   kills an adapter before the host.
 - SW-Serverless does not set operating-system limits such as cgroups. For a hard guarantee, run the

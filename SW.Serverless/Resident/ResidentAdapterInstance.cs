@@ -129,6 +129,32 @@ namespace SW.Serverless.Resident
 
         public IReadOnlyCollection<string> Diagnostics => diagnostics.ToArray();
 
+        /// <summary>
+        /// Why the host stopped this process, when it was the host's doing rather than the adapter's:
+        /// a memory or CPU ceiling it crossed, or heartbeats it stopped answering. Null otherwise.
+        /// Calls cut short by that stop fail with an <see cref="AdapterStoppedException"/> that says so.
+        /// </summary>
+        public string StopReason { get; private set; }
+
+        /// <summary>True when <see cref="StopReason"/> is a resource ceiling.</summary>
+        public bool StoppedForLimit { get; private set; }
+
+        /// <summary>Records why the supervisor is about to stop it; the first reason stands.</summary>
+        internal void MarkStopping(string reason, bool limit)
+        {
+            if (StopReason != null) return;
+            StoppedForLimit = limit;
+            StopReason = reason;
+        }
+
+        /// <summary>What a call that can no longer be answered fails with.</summary>
+        Exception StreamClosed() => StopReason == null
+            ? new IOException("Adapter stream closed.")
+            : new AdapterStoppedException(AdapterId, StopReason, StoppedForLimit);
+
+        string NotReady() => $"Adapter {AdapterId} is {State}, not Ready." +
+                             (StopReason == null ? "" : $" It stopped: {StopReason}.");
+
         /// <summary>Completes when the adapter has attached and been made Ready.</summary>
         public Task Attached => attached.Task;
 
@@ -211,7 +237,7 @@ namespace SW.Serverless.Resident
             {
                 State = InstanceState.Stopped;
                 stateRequests.Writer.TryComplete();
-                FailAllPending(new IOException("Adapter stream closed."));
+                FailAllPending(StreamClosed());
             }
         }
 
@@ -399,7 +425,7 @@ namespace SW.Serverless.Resident
             string sessionId = null, IDictionary<string, string> properties = null)
         {
             if (State != InstanceState.Ready)
-                throw new InvalidOperationException($"Adapter {AdapterId} is {State}, not Ready.");
+                throw new InvalidOperationException(NotReady());
 
             var id = Interlocked.Increment(ref nextId);
             var call = new PendingCall
@@ -413,7 +439,7 @@ namespace SW.Serverless.Resident
             // FailAllPending has already run, so nothing would ever complete this call and it
             // waited out the whole timeout.
             if (State == InstanceState.Stopped && pending.TryRemove(id, out _))
-                throw new IOException("Adapter stream closed.");
+                throw StreamClosed();
 
             var timeout = timeoutSeconds > 0
                 ? TimeSpan.FromSeconds(timeoutSeconds)
@@ -520,7 +546,7 @@ namespace SW.Serverless.Resident
             CancellationToken cancellationToken = default)
         {
             if (State != InstanceState.Ready)
-                throw new InvalidOperationException($"Adapter {AdapterId} is {State}, not Ready.");
+                throw new InvalidOperationException(NotReady());
 
             var id = Interlocked.Increment(ref nextId);
             var call = new PendingCall
@@ -612,6 +638,27 @@ namespace SW.Serverless.Resident
             public Timer Timer;
             public CallKind Kind;
         }
+    }
+
+    /// <summary>
+    /// A call cut short because the host stopped the adapter on purpose: it crossed a memory or CPU
+    /// ceiling, or stopped answering heartbeats. An <see cref="IOException"/>, as a closed stream
+    /// always was, so code that caught that still does.
+    /// </summary>
+    public class AdapterStoppedException : IOException
+    {
+        public AdapterStoppedException(string adapterId, string reason, bool limitExceeded)
+            : base($"Adapter '{adapterId}' stopped: {reason}.")
+        {
+            Reason = reason;
+            LimitExceeded = limitExceeded;
+        }
+
+        /// <summary>Why, in words a person can act on.</summary>
+        public string Reason { get; }
+
+        /// <summary>True when it crossed a memory or CPU ceiling.</summary>
+        public bool LimitExceeded { get; }
     }
 
     public class AdapterInvocationException : Exception

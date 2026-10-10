@@ -717,6 +717,8 @@ namespace SW.Serverless.Resident
                 if (supervised.MissedHeartbeats >= options.MissedHeartbeatsBeforeRestart)
                 {
                     supervised.MissedHeartbeats = 0;
+                    instance.MarkStopping(
+                        $"it missed {options.MissedHeartbeatsBeforeRestart} heartbeats in a row and was restarted", limit: false);
                     TryKill(instance.Process);   // Exited handler restarts it
                 }
             }
@@ -772,6 +774,9 @@ namespace SW.Serverless.Resident
                         logger.LogWarning(
                             "Adapter {AdapterId}/{InstanceKey} held {Cpu}% CPU across {Samples} samples (limit {Limit}%); asking it to drain.",
                             instance.AdapterId, instance.InstanceKey, supervised.CpuPercent, cpuSamples, cpuLimit);
+                        instance.MarkStopping(
+                            $"it held {supervised.CpuPercent}% CPU for {cpuSamples} samples in a row, over its CPU limit of {Math.Round(cpuLimit, 1)}%, and was asked to stop",
+                            limit: true);
                         instance.RequestShutdown("sustained cpu limit", drain: true);
                         return;
                     }
@@ -784,17 +789,22 @@ namespace SW.Serverless.Resident
                     supervised.DrainRequestedOn = DateTimeOffset.UtcNow;
                     logger.LogWarning("Adapter {AdapterId}/{InstanceKey} at {Rss} MB crossed the soft limit; asking it to drain.",
                         instance.AdapterId, instance.InstanceKey, rss / 1024 / 1024);
+                    instance.MarkStopping(
+                        $"it was using {Mb(rss)}, over its soft memory limit of {Mb(soft)}, and was asked to stop", limit: true);
                     instance.RequestShutdown("soft memory limit", drain: true);
                 }
                 else if (hard > 0 && rss > hard)
                 {
                     logger.LogError("Adapter {AdapterId}/{InstanceKey} at {Rss} MB crossed the hard limit; killing.",
                         instance.AdapterId, instance.InstanceKey, rss / 1024 / 1024);
+                    instance.MarkStopping($"it was using {Mb(rss)}, over its memory limit of {Mb(hard)}, and was killed", limit: true);
                     TryKill(process);
                 }
             }
             catch { /* sampling must never throw */ }
         }
+
+        static string Mb(long bytes) => $"{Math.Round(bytes / 1024.0 / 1024.0)} MB";
 
         static int SafeExitCode(Process p) { try { return p?.ExitCode ?? -1; } catch { return -1; } }
         static void TryKill(Process p) { try { if (p != null && !p.HasExited) p.Kill(entireProcessTree: true); } catch { } }

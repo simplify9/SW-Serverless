@@ -193,6 +193,12 @@ namespace SW.Serverless.Runtimes
             }
         }
 
+        /// <summary>
+        /// The memory ceiling, in bytes, handed to a Python adapter, whose SDK applies it as a
+        /// resource limit where the platform enforces one (Linux). Absent when there is no ceiling.
+        /// </summary>
+        public const string MemoryLimitVariable = "SW_SERVERLESS_MEMORY_LIMIT_BYTES";
+
         sealed class PythonRuntime(string executable) : IAdapterRuntime
         {
             public string Name => AdapterManifest.PythonRuntime;
@@ -208,8 +214,14 @@ namespace SW.Serverless.Runtimes
                 foreach (var argument in launch.Arguments) psi.ArgumentList.Add(argument);
                 psi.Environment["PYTHONUNBUFFERED"] = "1";
                 psi.Environment["PYTHONDONTWRITEBYTECODE"] = "1";
-                // Python has no heap ceiling of its own; the watchdog and, where the container
-                // allows them, cgroups are what hold it.
+                // Python has no heap ceiling of its own. The SDK (10.2.1 and later) reads this one
+                // and, on Linux, sets RLIMIT_DATA to it, so an allocation past it raises MemoryError
+                // inside the adapter; the watchdog and, where the container allows them, cgroups
+                // hold it everywhere else. Never inherited from the host: no limit means none.
+                if (launch.HardMemoryLimitBytes > 0)
+                    psi.Environment[MemoryLimitVariable] = launch.HardMemoryLimitBytes.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                else
+                    psi.Environment.Remove(MemoryLimitVariable);
                 return psi;
             }
         }
