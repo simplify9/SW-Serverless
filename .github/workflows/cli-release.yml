@@ -65,7 +65,7 @@ jobs:
           else
             tar -czf dist/sw-serverless-${{ matrix.rid }}.tar.gz -C out .
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sw-serverless-${{ matrix.rid }}
           path: dist/*
