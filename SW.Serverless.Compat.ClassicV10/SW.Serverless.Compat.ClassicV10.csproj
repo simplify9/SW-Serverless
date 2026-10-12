@@ -8,6 +8,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="SimplyWorks.PrimitiveTypes" Version="10.0.1" />
     <PackageReference Include="SimplyWorks.Serverless.Sdk" Version="10.0.0" />
   </ItemGroup>
 </Project>
