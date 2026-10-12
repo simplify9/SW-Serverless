@@ -176,11 +176,21 @@ function describe(Adapter) {
 
 // ---------------------------------------------------------------------------- the connection
 
-/** One gRPC bidirectional stream, Attach, over the host's Unix socket. */
+/**
+ * Where the host listens, from its handshake: a Unix socket on Linux and macOS, a named pipe on
+ * Windows. net.connect takes either path.
+ */
+function endpointOf(handshake) {
+  if (handshake.socket) return handshake.socket;
+  if (handshake.pipe) return handshake.pipe.startsWith("\\\\") ? handshake.pipe : `\\\\.\\pipe\\${handshake.pipe}`;
+  throw new Error("the handshake names neither a socket nor a pipe to attach to");
+}
+
+/** One gRPC bidirectional stream, Attach, over the host's Unix socket or named pipe. */
 class Stream {
-  constructor(socketPath) {
+  constructor(endpoint) {
     this.session = http2.connect("http://localhost", {
-      createConnection: () => net.connect(socketPath),
+      createConnection: () => net.connect(endpoint),
       settings: { initialWindowSize: 16 * 1024 * 1024 },
       maxSessionMemory: 256,
     });
@@ -374,12 +384,12 @@ class Runner {
     this.handshake = JSON.parse(line);
     if (Number(this.handshake.protocol ?? 2) < PROTOCOL)
       throw new Error(`the host speaks protocol ${this.handshake.protocol}; this SDK speaks ${PROTOCOL}`);
-    if (!this.handshake.socket) throw new Error("the handshake names no socket; this SDK runs on Linux and macOS hosts");
+    const endpoint = endpointOf(this.handshake);
 
     this.ready = new Promise((resolve) => (this.readyResolve = resolve));
     this.rootContext = new Context(this, null, null, this.stopping.signal);
     currentRunner = this;
-    this.stream = new Stream(this.handshake.socket);
+    this.stream = new Stream(endpoint);
     await this.send({ hello: this.hello() });
 
     try {
@@ -604,5 +614,5 @@ function run(Adapter) {
 module.exports = {
   AdapterError, Context, SDK_VERSION, context, declaredSettings, describe, expect, log, run, valueOf,
   startupValues: () => Object.fromEntries(startupValues),
-  _internal: { commandsOf, decodeArgument, encodeResult, schemaOf, wire },
+  _internal: { commandsOf, decodeArgument, encodeResult, endpointOf, schemaOf, wire },
 };

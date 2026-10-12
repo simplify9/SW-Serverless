@@ -17,7 +17,7 @@ import time
 import traceback
 
 from . import _adapter, _types, _wire
-from ._http2 import GrpcStream
+from ._http2 import GrpcStream, endpoint_of
 
 SDK_VERSION = "10.2.2"
 SDK_LANGUAGE = "python"
@@ -190,9 +190,7 @@ class Runner:
         self.handshake = json.loads(handshake_line)
         if int(self.handshake.get("protocol") or 2) < PROTOCOL:
             raise RuntimeError(f"the host speaks protocol {self.handshake.get('protocol')}; this SDK speaks {PROTOCOL}")
-        socket_path = self.handshake.get("socket")
-        if not socket_path:
-            raise RuntimeError("the handshake names no socket; this SDK runs on Linux and macOS hosts")
+        endpoint = endpoint_of(self.handshake)
 
         self.loop = asyncio.get_running_loop()
         self.stopping = asyncio.Event()
@@ -200,7 +198,7 @@ class Runner:
         self._telemetry = asyncio.Queue(maxsize=10000)
         _context.set(Context(self))
 
-        self.stream = await GrpcStream.open(socket_path, ATTACH)
+        self.stream = await GrpcStream.open(endpoint, ATTACH)
         await self.send({"hello": self.hello()})
 
         handler = _HostLogHandler(self)

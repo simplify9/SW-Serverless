@@ -60,3 +60,21 @@ class HpackTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EndpointTests(unittest.TestCase):
+    """Where the adapter attaches: the host's Unix socket, or its named pipe on Windows."""
+
+    def test_a_socket_is_attached_to_as_given(self):
+        from sw_serverless._http2 import endpoint_of
+        self.assertEqual(("socket", "/tmp/sw.sock"), endpoint_of({"socket": "/tmp/sw.sock"}))
+
+    def test_a_pipe_name_becomes_its_full_path(self):
+        from sw_serverless._http2 import endpoint_of
+        self.assertEqual(("pipe", "\\\\.\\pipe\\sw-serverless-1"), endpoint_of({"pipe": "sw-serverless-1"}))
+        self.assertEqual(("pipe", "\\\\.\\pipe\\x"), endpoint_of({"pipe": "\\\\.\\pipe\\x"}))
+
+    def test_a_handshake_naming_neither_is_refused(self):
+        from sw_serverless._http2 import endpoint_of
+        with self.assertRaises(RuntimeError):
+            endpoint_of({})

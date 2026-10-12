@@ -59,8 +59,13 @@ class GrpcStream:
         self._read_task = None
 
     @classmethod
-    async def open(cls, socket_path, path):
-        reader, writer = await asyncio.open_unix_connection(socket_path, limit=2 ** 20)
+    async def open(cls, endpoint, path):
+        """endpoint is ("socket", path) on Linux and macOS, or ("pipe", the pipe's full path) on Windows."""
+        kind, address = endpoint
+        if kind == "pipe":
+            reader, writer = await _open_pipe_connection(address, limit=2 ** 20)
+        else:
+            reader, writer = await asyncio.open_unix_connection(address, limit=2 ** 20)
         stream = cls(reader, writer, path)
         await stream._start()
         return stream
@@ -251,3 +256,25 @@ class GrpcStream:
             pass
         if self._read_task:
             self._read_task.cancel()
+
+
+def endpoint_of(handshake):
+    """Where the host listens, from its handshake: a Unix socket, or a named pipe on Windows."""
+    if handshake.get("socket"):
+        return ("socket", handshake["socket"])
+    pipe = handshake.get("pipe")
+    if pipe:
+        return ("pipe", pipe if pipe.startswith("\\\\") else "\\\\.\\pipe\\" + pipe)
+    raise RuntimeError("the handshake names neither a socket nor a pipe to attach to")
+
+
+async def _open_pipe_connection(address, limit):
+    """asyncio's streams over a Windows named pipe, which only the proactor event loop can open."""
+    loop = asyncio.get_running_loop()
+    if not hasattr(loop, "create_pipe_connection"):
+        raise RuntimeError("named pipes need the proactor event loop, which Python uses on Windows by default")
+    reader = asyncio.StreamReader(limit=limit, loop=loop)
+    protocol = asyncio.StreamReaderProtocol(reader, loop=loop)
+    transport, _ = await loop.create_pipe_connection(lambda: protocol, address)
+    writer = asyncio.StreamWriter(transport, protocol, reader, loop)
+    return reader, writer

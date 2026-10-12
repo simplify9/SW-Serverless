@@ -89,3 +89,11 @@ test("values come from startup, then the default, then the fallback", () => {
   assert.strictEqual(sw.valueOf("Missing"), undefined);
   assert.strictEqual(sw.valueOf("Missing", "x"), "x");
 });
+
+test("an adapter attaches to the host's socket, or its named pipe on Windows", () => {
+  const { endpointOf } = sw._internal;
+  assert.strictEqual(endpointOf({ socket: "/tmp/sw.sock" }), "/tmp/sw.sock");
+  assert.strictEqual(endpointOf({ pipe: "sw-serverless-1" }), "\\\\.\\pipe\\sw-serverless-1");
+  assert.strictEqual(endpointOf({ pipe: "\\\\.\\pipe\\x" }), "\\\\.\\pipe\\x");
+  assert.throws(() => endpointOf({}));
+});

@@ -449,8 +449,12 @@ output (`Diagnostics`).
 | JavaScript, TypeScript | `node`, version 22 or later (or what the adapter's `runtimeVersion` asks for). Nothing from npm. |
 | `exec` | Nothing; the package is the program. It must be built for the host's platform. |
 
-The Python and Node SDKs connect over a Unix domain socket only, so Python and Node adapters run
-on Linux and macOS hosts, not Windows. .NET adapters run on all three.
+The Python and Node SDKs attach over the host's Unix domain socket on Linux and macOS, and over its
+named pipe on Windows, so adapters in every runtime run on all three. A Python or Node adapter has to
+be built with an SDK released after 10.2.2 to run on Windows; one built before stops at start-up there,
+saying the handshake names no socket. Windows is covered by tests of how the SDKs choose where to
+attach, not yet by an adapter run on a Windows host. Python on Windows needs asyncio's proactor event
+loop, which is its default.
 
 ## Security
 
