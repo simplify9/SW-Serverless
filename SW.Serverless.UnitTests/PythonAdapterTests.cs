@@ -132,6 +132,19 @@ namespace SW.Serverless.UnitTests
         }
 
         [TestMethod]
+        public async Task Retry_later_reaches_the_caller_as_a_wait_a_host_can_read()
+        {
+            await InSession("test.python.classic", null, async s =>
+            {
+                var later = await Assert.ThrowsExceptionAsync<AdapterInvocationException>(() => s.InvokeAsync<string>("Later", 30));
+                Assert.AreEqual("RetryLaterException", later.AdapterExceptionType);
+                // What a host reads: the type, then the message starting with the wait.
+                StringAssert.StartsWith(later.Message, "RetryLaterException: {{retryAfter:30}} the partner is busy");
+                return 0;
+            });
+        }
+
+        [TestMethod]
         public async Task An_error_reaches_the_caller_with_its_type_and_message()
         {
             await InSession("test.python.classic", null, async s =>

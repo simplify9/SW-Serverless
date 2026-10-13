@@ -285,6 +285,23 @@ adapter keeps running and can take the next command.
 A command the adapter does not have fails with the type `MissingMethodException` (Python and
 Node) or `System.MissingMethodException` (.NET on protocol 2).
 
+### Saying when to try again
+
+A failure worth retrying, but not yet, as when a partner answered 429 Too Many Requests with a
+`Retry-After`, can say how long to wait:
+
+| | |
+|---|---|
+| .NET | `throw new RetryLaterException(TimeSpan.FromSeconds(30), "The partner asked to wait.");` |
+| Python | `raise sw.RetryLater(30, "The partner asked to wait.")` (seconds, or a `timedelta`) |
+| Node | `throw new sw.RetryLater(30, "The partner asked to wait.");` |
+
+Each fails the command with an error whose message starts with `{{retryAfter:SECONDS}}`, whole
+seconds rounded up, and whose type is `RetryLaterException` (its full name in .NET). That message is
+the whole contract: any error whose message starts that way says the same, so an adapter on an older
+SDK can write it itself. A host that reads it, as Bitween does, schedules the retry its policy allows
+no sooner than that; to any other host it is an ordinary failure.
+
 ## Logging
 
 | | How | Reaches the host as |

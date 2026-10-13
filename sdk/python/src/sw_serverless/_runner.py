@@ -6,6 +6,7 @@ one-time token — and keeps stdin open: when it closes, the host is gone and th
 
 import asyncio
 import contextvars
+import math
 import inspect
 import itertools
 import json
@@ -43,6 +44,21 @@ class AdapterError(Exception):
         super().__init__(message)
         self.type = type
         self.detail = detail
+
+
+class RetryLater(AdapterError):
+    """A failure worth retrying, but not for ``after`` seconds: a partner answered 429 with a
+    Retry-After, or a quota resets at a known time.
+
+    The message starts with ``{{retryAfter:SECONDS}}``, which is the whole of the contract: a host
+    that reads it, as Bitween does, schedules the retry its policy allows no sooner than that. Any
+    error whose message starts that way says the same; this only writes it for you.
+    """
+
+    def __init__(self, after, message="", *, detail=None):
+        seconds = max(0, math.ceil(after.total_seconds() if hasattr(after, "total_seconds") else float(after)))
+        super().__init__(f"{{{{retryAfter:{seconds}}}}} {message}".rstrip(), type="RetryLaterException", detail=detail)
+        self.after = seconds
 
 
 class Context:

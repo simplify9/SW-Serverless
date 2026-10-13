@@ -13,6 +13,7 @@ class Classic {
     Bytes: { method: "bytes", input: "bytes", output: "bytes" },
     Nothing: { method: "nothing" },
     Slow: { method: "slow", input: "json", output: "string" },
+    Later: { method: "later", input: "json", output: "string" },
   };
 
   constructor() {
@@ -25,6 +26,7 @@ class Classic {
   async add({ A, B }) { return A + B; }
   fail(message) { throw new sw.AdapterError(message, { type: "Acme.Rejected" }); }
   crash() { return undefined.missing; }
+  later(seconds) { throw new sw.RetryLater(seconds, "the partner is busy"); }
   big(size) { return "x".repeat(size); }
   length(text) { return text.length; }
   bytes(data) { return Buffer.from(data).reverse(); }

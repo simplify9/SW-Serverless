@@ -18,11 +18,11 @@
 """
 
 from ._adapter import command, declared_settings, expect, implements, startup_values, value_of
-from ._runner import SDK_VERSION, AdapterError, Context, context, describe, run
+from ._runner import SDK_VERSION, AdapterError, Context, RetryLater, context, describe, run
 
 __version__ = SDK_VERSION
 
 __all__ = [
-    "AdapterError", "Context", "SDK_VERSION", "command", "context", "declared_settings", "describe",
+    "AdapterError", "Context", "RetryLater", "SDK_VERSION", "command", "context", "declared_settings", "describe",
     "expect", "implements", "run", "startup_values", "value_of",
 ]

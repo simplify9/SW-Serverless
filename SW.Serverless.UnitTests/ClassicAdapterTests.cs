@@ -132,5 +132,17 @@ namespace SW.Serverless.UnitTests
 
             StringAssert.Contains(ex.Message, "INVALID_ACCOUNT");
         }
+
+        [TestMethod]
+        public async Task Retry_later_reaches_the_caller_as_a_wait_a_host_can_read()
+        {
+            var serverless = Resolve();
+            await serverless.StartAsync(AdapterId, Guid.NewGuid().ToString("N"), Startup);
+
+            var ex = await Assert.ThrowsExceptionAsync<Exception>(() => serverless.InvokeAsync("Later", null));
+
+            // The classic runner's error line: the exception's type, then its message, starting with the wait.
+            StringAssert.Contains(ex.Message, "SW.Serverless.Sdk.RetryLaterException: {{retryAfter:30}} The carrier asked to wait.");
+        }
     }
 }

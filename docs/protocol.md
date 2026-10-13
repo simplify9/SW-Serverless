@@ -236,7 +236,10 @@ An `Error` has `type`, `message` and `detail`.
 - `detail` is a stack trace or similar, for logs.
 
 Conventions: an unknown command fails with type `MissingMethodException` (or
-`System.MissingMethodException`), and a cancelled call with `OperationCanceledException`.
+`System.MissingMethodException`), and a cancelled call with `OperationCanceledException`. A failure
+worth retrying no sooner than some time from now has a `message` starting with
+`{{retryAfter:SECONDS}}` and, from the SDKs' helpers, the type `RetryLaterException`; the classic
+protocol 1 carries the same message in its error line.
 
 ## Stopping
 

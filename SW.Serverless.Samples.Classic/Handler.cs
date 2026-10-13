@@ -128,6 +128,9 @@ namespace SW.Serverless.Samples.Classic
         }
 
         /// <summary>An exception here comes back as a faulted task on the host, not a hang.</summary>
+        public Task Later() =>
+            throw new RetryLaterException(TimeSpan.FromSeconds(30), "The carrier asked to wait.");
+
         public Task Fail()
         {
             AdapterLogger.LogError(null, "Fail was called deliberately.");

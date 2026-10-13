@@ -122,3 +122,14 @@ class DescribeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetryLaterTests(unittest.TestCase):
+    def test_the_message_starts_with_the_wait_in_whole_seconds(self):
+        import datetime
+        later = sw.RetryLater(datetime.timedelta(seconds=12.2), "busy")
+        self.assertEqual("{{retryAfter:13}} busy", str(later))
+        self.assertEqual("RetryLaterException", later.type)
+        self.assertEqual(13, later.after)
+        self.assertEqual("{{retryAfter:0}}", str(sw.RetryLater(-5)))
+        self.assertIsInstance(later, sw.AdapterError)

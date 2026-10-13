@@ -33,6 +33,10 @@ class Classic:
     def fail(self, message: str) -> str:
         raise sw.AdapterError(message, type="Acme.Rejected")
 
+    @sw.command("Later")
+    def later(self, seconds: int) -> str:
+        raise sw.RetryLater(seconds, "the partner is busy")
+
     @sw.command("Crash")
     def crash(self) -> str:
         return {}["missing"]

@@ -47,6 +47,21 @@ class AdapterError extends Error {
   }
 }
 
+/**
+ * A failure worth retrying, but not for `after` seconds: a partner answered 429 with a Retry-After,
+ * or a quota resets at a known time. The message starts with `{{retryAfter:SECONDS}}`, which is the
+ * whole of the contract: a host that reads it, as Bitween does, schedules the retry its policy
+ * allows no sooner than that. Any error whose message starts that way says the same.
+ */
+class RetryLater extends AdapterError {
+  constructor(after, message = "", { detail } = {}) {
+    const seconds = Math.max(0, Math.ceil(Number(after) || 0));
+    super(`{{retryAfter:${seconds}}} ${message}`.trimEnd(), { type: "RetryLaterException", detail });
+    this.name = "RetryLater";
+    this.after = seconds;
+  }
+}
+
 // ---------------------------------------------------------------------------- settings
 
 const settings = new Map();
@@ -612,7 +627,7 @@ function run(Adapter) {
 }
 
 module.exports = {
-  AdapterError, Context, SDK_VERSION, context, declaredSettings, describe, expect, log, run, valueOf,
+  AdapterError, Context, RetryLater, SDK_VERSION, context, declaredSettings, describe, expect, log, run, valueOf,
   startupValues: () => Object.fromEntries(startupValues),
   _internal: { commandsOf, decodeArgument, encodeResult, endpointOf, schemaOf, wire },
 };

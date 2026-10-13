@@ -97,3 +97,12 @@ test("an adapter attaches to the host's socket, or its named pipe on Windows", (
   assert.strictEqual(endpointOf({ pipe: "\\\\.\\pipe\\x" }), "\\\\.\\pipe\\x");
   assert.throws(() => endpointOf({}));
 });
+
+test("RetryLater says the wait in whole seconds at the start of its message", () => {
+  const later = new sw.RetryLater(12.2, "busy");
+  assert.strictEqual(later.message, "{{retryAfter:13}} busy");
+  assert.strictEqual(later.type, "RetryLaterException");
+  assert.strictEqual(later.after, 13);
+  assert.ok(later instanceof sw.AdapterError);
+  assert.strictEqual(new sw.RetryLater(-5).message, "{{retryAfter:0}}");
+});
