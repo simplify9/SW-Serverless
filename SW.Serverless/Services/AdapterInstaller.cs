@@ -386,6 +386,13 @@ namespace SW.Serverless
                                   ?? throw new InvalidOperationException(
                                       $"Adapter '{adapterId}' metadata at '{remotePath}' has an 'EntryAssembly' outside its package.");
 
+            // A pinned version never changes once published, so its resolution is kept for the life
+            // of the process. Only a plain id's current package can move, and it is read again after
+            // AdapterMetadataCacheDuration. A host whose agents are all pinned then makes no storage
+            // round trip per adapter every few minutes.
+            if (AdapterCatalogPaths.Split(adapterId).Version != null)
+                return memoryCache.Set($"{NamingPrefix}.{adapterId}", installed);
+
             return memoryCache.Set($"{NamingPrefix}.{adapterId}", installed,
                 TimeSpan.FromMinutes(options.AdapterMetadataCacheDuration));
         }

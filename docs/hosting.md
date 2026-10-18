@@ -100,7 +100,7 @@ Rules to know:
 |---|---|---|
 | `AdapterRemotePath` | `"adapters"` | The root folder in storage. Must match the root adapters were published under; the CLI always publishes under `adapters`. |
 | `AdapterLocalPath` | `"./adapters"` | Where packages are unpacked on this machine, one folder per package. |
-| `AdapterMetadataCacheDuration` | `5` | Minutes the host remembers which package an adapter id resolves to. A newly promoted version is picked up once this expires. |
+| `AdapterMetadataCacheDuration` | `5` | Minutes the host remembers which package an adapter id resolves to. A newly promoted version is picked up once this expires. A pinned ref (`{id}/{version}`) never changes, so it is resolved once and kept for the life of the process. |
 | `CommandTimeout` | `30` | Seconds a classic session's command may take, unless the call passes its own. |
 | `IdleTimeout` | `300` | Seconds a protocol 1 (.NET classic) adapter waits for its next command before it exits. |
 
