@@ -311,9 +311,14 @@ namespace SW.Serverless.Resident
         /// stopped or replaced by then. A failed relaunch is retried with backoff rather than logged
         /// once and abandoned, which left an integration silently dead with nothing to notice it.
         /// </summary>
-        void ScheduleRestart(Supervised supervised, TimeSpan delay)
+        internal void ScheduleRestart(Supervised supervised, TimeSpan delay)
         {
-            var restart = CancellationTokenSource.CreateLinkedTokenSource(stopping.Token);
+            // The host can stop, and dispose this token, after an exit was seen but before its
+            // restart is scheduled. Throwing here, on the process's Exited callback, crashed the app.
+            CancellationTokenSource restart;
+            try { restart = CancellationTokenSource.CreateLinkedTokenSource(stopping.Token); }
+            catch (ObjectDisposedException) { return; }
+
             Interlocked.Exchange(ref supervised.PendingRestart, restart)?.Cancel();
 
             _ = Task.Run(async () =>
