@@ -289,6 +289,13 @@ namespace SW.Serverless
                 {
                     adapterLogger.LogError(args.Data.Replace(Constants.LogErrorIdentifier, "").Replace(Constants.NewLineIdentifier, "\n"));
                 }
+                // A line without a marker was not written by the SDK: dotnet saying why it would not
+                // start the adapter, or the runtime reporting a crash. Dropping it left an adapter
+                // that died with no reason anywhere, only "Received null data." on the call.
+                else if (!string.IsNullOrWhiteSpace(args.Data))
+                {
+                    adapterLogger.LogWarning(args.Data);
+                }
             }
             catch (Exception ex)
             {
