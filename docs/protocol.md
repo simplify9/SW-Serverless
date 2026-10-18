@@ -320,7 +320,8 @@ In brief:
   `#!#<result>#!#`, or `{{error}}<exception text>`.
 - `{{expected}}` as the command asks for the declared settings; `{{quit}}` ends the process.
 - Log lines go to standard error, starting with `{{log.information}}`, `{{log.warning}}` or
-  `{{log.error}}`.
+  `{{log.error}}`. Any other line there, such as dotnet's own reason for not starting the adapter,
+  is logged as a warning.
 - One call at a time. A timed-out call kills the process.
 
 New SDKs should implement protocol 2.
