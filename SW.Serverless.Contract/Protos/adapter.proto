@@ -37,6 +37,12 @@ message Ready {
     int32 max_in_flight = 1;
     map<string, string> startup_values = 2;
     map<string, string> adapter_values = 3;
+
+    // The host's ServerlessOptions as JSON: what a classic adapter receives on argv[1] and reads
+    // through Runner.ServerlessOptions (its cloud-files settings, to read an attachment from the
+    // host's storage). Empty from a host built before this field, and the SDK then falls back to
+    // defaults, as the classic runner does when argv[1] can't be read.
+    string serverless_options = 4;
 }
 
 message Invoke {

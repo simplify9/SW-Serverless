@@ -127,6 +127,9 @@ namespace SW.Serverless.Resident
         public int ProtocolVersion { get; internal set; }
         public IReadOnlyDictionary<string, string> AdapterValues { get; internal set; }
 
+        /// <summary>The host's ServerlessOptions as JSON, sent in Ready; null sends none.</summary>
+        internal string ServerlessOptionsJson { get; set; }
+
         public IReadOnlyCollection<string> Diagnostics => diagnostics.ToArray();
 
         /// <summary>
@@ -211,7 +214,8 @@ namespace SW.Serverless.Resident
                 {
                     MaxInFlight = options.MaxInFlight,
                     StartupValues = { WithoutNulls(StartupValues) },
-                    AdapterValues = { WithoutNulls(AdapterValues) }
+                    AdapterValues = { WithoutNulls(AdapterValues) },
+                    ServerlessOptions = ServerlessOptionsJson ?? string.Empty
                 }
             });
 

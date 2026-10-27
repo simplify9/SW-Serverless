@@ -131,6 +131,7 @@ The host answers with `Ready`:
 | `max_in_flight` | How many events the adapter may have waiting for an EventAck at once. |
 | `startup_values` | The settings, name to value. Includes `CorrelationId` for classic sessions. |
 | `adapter_values` | Extra values from the package's storage metadata and the host. |
+| `serverless_options` | The host's `ServerlessOptions` as JSON, what a classic adapter gets on argv[1] (its cloud-files settings, for one). The .NET SDK exposes it as `Runner.ServerlessOptions`. Empty from older hosts; the SDK then uses defaults. |
 
 After Ready the host considers the instance ready and may send Invoke at once. An SDK should build
 the adapter and run its start hook on Ready, before running commands, and must keep reading frames

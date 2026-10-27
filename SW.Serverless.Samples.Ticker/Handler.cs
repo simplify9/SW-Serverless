@@ -227,6 +227,13 @@ namespace SW.Serverless.Samples.Ticker
             value = SW.Serverless.Sdk.Runner.StartupValueOf(name)
         });
 
+        /// <summary>What a classic adapter reads from argv[1], read the same way once resident.</summary>
+        public Task<object> ReadServerlessOptions() => Task.FromResult<object>(new
+        {
+            remotePath = SW.Serverless.Sdk.Runner.ServerlessOptions?.AdapterRemotePath,
+            bucket = SW.Serverless.Sdk.Runner.ServerlessOptions?.CloudFilesOptions?.BucketName
+        });
+
         /// <summary>A result too big to send in one frame.</summary>
         public Task<string> Huge(int megabytes) =>
             Task.FromResult(new string('x', megabytes * 1024 * 1024));

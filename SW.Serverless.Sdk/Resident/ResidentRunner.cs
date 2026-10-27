@@ -360,6 +360,7 @@ namespace SW.Serverless.Sdk.Resident
             adapterValues = new Dictionary<string, string>(ready.AdapterValues, StringComparer.OrdinalIgnoreCase);
             inFlight = new SemaphoreSlim(Math.Max(1, ready.MaxInFlight));
             Runner.UseResident(startupValues, adapterValues, ValueOf);
+            Runner.UseResidentOptions(ready.ServerlessOptions);
 
             // Now, and only now, is it safe to construct the handler.
             handler = handlerFactory(this);
