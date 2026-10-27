@@ -319,6 +319,23 @@ namespace SW.Serverless.UnitTests
         }
 
         /// <summary>
+        /// A classic adapter reads the host's ServerlessOptions (its cloud-files settings, say, to
+        /// fetch an attachment) from argv[1]. Resident, the same Runner.ServerlessOptions comes from
+        /// Ready; before, it stayed null and such an adapter threw the first time it read it.
+        /// </summary>
+        [TestMethod]
+        public async Task The_hosts_serverless_options_reach_the_runner()
+        {
+            var instance = await StartTicker("options");
+
+            var options = await instance.InvokeAsync<Dictionary<string, string>>("ReadServerlessOptions");
+
+            Assert.AreEqual("adapters", options["remotePath"]);
+
+            await adapters.StopAsync(TickerId, "options", drain: false);
+        }
+
+        /// <summary>
         /// A per-call value wins over the process default, and an adapter called WITHOUT properties
         /// still sees the startup value — which is what keeps every existing adapter working.
         /// </summary>

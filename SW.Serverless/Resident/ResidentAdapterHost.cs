@@ -15,6 +15,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using SW.PrimitiveTypes;
 
 namespace SW.Serverless.Resident
 {
@@ -43,10 +44,14 @@ namespace SW.Serverless.Resident
 
         readonly IResidentAdapterLocator locator;
 
+        // What classic adapters get on argv[1]; resident ones get it in Ready.
+        readonly string serverlessOptionsJson;
+
         public ResidentAdapterHost(ResidentOptions options, IAdapterEventSink sink,
             IAdapterStateStore stateStore, IResidentAdapterLocator locator, ILoggerFactory loggerFactory,
-            Runtimes.AdapterRuntimes runtimes = null)
+            Runtimes.AdapterRuntimes runtimes = null, ServerlessOptions serverlessOptions = null)
         {
+            serverlessOptionsJson = serverlessOptions == null ? null : Newtonsoft.Json.JsonConvert.SerializeObject(serverlessOptions);
             this.options = options;
             this.sink = sink;
             this.stateStore = stateStore;
@@ -211,6 +216,7 @@ namespace SW.Serverless.Resident
                     spec.StartupValues ?? new Dictionary<string, string>()),
                 AdapterValues = new Dictionary<string, string>(
                     spec.AdapterValues ?? new Dictionary<string, string>()),
+                ServerlessOptionsJson = serverlessOptionsJson,
                 RestartCount = supervised.RestartCount
             };
 

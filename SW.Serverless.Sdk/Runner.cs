@@ -34,6 +34,21 @@ namespace SW.Serverless.Sdk
             residentValueOf = valueOf;
         }
 
+        /// <summary>
+        /// The host's ServerlessOptions from Ready, so <see cref="ServerlessOptions"/> isn't null in a
+        /// resident adapter. Defaults when the host sent none, as the classic runner falls back.
+        /// </summary>
+        internal static void UseResidentOptions(string serverlessOptionsJson)
+        {
+            ServerlessOptions = null;
+            if (!string.IsNullOrEmpty(serverlessOptionsJson))
+            {
+                try { ServerlessOptions = JsonConvert.DeserializeObject<ServerlessOptions>(serverlessOptionsJson); }
+                catch (Exception exception) { AdapterLogger.LogWarning(exception, "Failed to parse ServerlessOptions, using defaults instead."); }
+            }
+            ServerlessOptions ??= new ServerlessOptions();
+        }
+
         /// <summary>The default declared with <see cref="Expect(string, string, bool, string)"/>, if any.</summary>
         internal static string ExpectedDefault(string name) =>
             expectedStartupValues.TryGetValue(name, out var expected) ? expected.Default : null;
