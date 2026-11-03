@@ -7,7 +7,7 @@
   <ItemGroup>
     <!-- Same version SW.Bus pins. The adapter talks to the broker directly; nothing about
          IConsume or IPublish is involved — the provider models RabbitMQ, not SW.Bus. -->
-    <PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.2.2" />
     <ProjectReference Include="..\SW.Serverless.Sdk\SW.Serverless.Sdk.csproj" />
   </ItemGroup>
 </Project>
