@@ -5,51 +5,146 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# No token scopes by default. The Publish job grants the ceiling the reusable
-# workflow's jobs run under; each of its jobs narrows it further.
-permissions: {}
+# Published with nuget.org Trusted Publishing: GitHub's OIDC token is traded for an API key that
+# lasts an hour, so there is no stored key to expire (the SWNUGETKEY secret had expired). nuget.org
+# takes the workflow file from the token's job_workflow_ref and requires it to be in this
+# repository, so the login can't run in simplify9/.github's reusable-nuget-publish.yml. Its jobs
+# are therefore written out here, using the same shared actions. The nuget.org policy: owner
+# simplify9, repository SW-Serverless, workflow nuget-publish.yml. NUGET_USER (a repository or
+# organisation variable) is the nuget.org user who created the policy.
+
+permissions:
+  contents: read
+
+# Serialize runs per ref so concurrent pushes can't race the tag-based version.
+concurrency:
+  group: nuget-publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  Publish:
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      git-tag: ${{ steps.semver.outputs.git-tag }}
+      is-release: ${{ steps.semver.outputs.is-release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # every tag, to compute the next version
+          persist-credentials: false
+      - name: Determine semantic version
+        id: semver
+        uses: simplify9/.github/.github/actions/determine-semver@main
+        with:
+          major: '10'
+          minor: '2'
+          # Only the default branch gets a release version; others get a prerelease.
+          release-branch: ${{ github.event.repository.default_branch }}
+          current-ref: ${{ github.ref_name }}
+          build-id: ${{ github.run_number }}
+
+  critical-vuln-gate:
+    name: Dependabot Check
+    needs: version
+    if: ${{ needs.version.outputs.is-release == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
-      contents: write         # tag job: create the git tag
-      packages: write         # nuget job: only used when pushing to a GitHub Packages feed
-      security-events: read   # critical-vuln gate job
-    uses: simplify9/.github/.github/workflows/reusable-nuget-publish.yml@0f33f79176152bc11acf0ff08ed970ae8b429b3d # main
-    with:
-      # Contract FIRST: the others depend on it, and publishing them without it produces
-      # packages whose dependency cannot resolve — which is what 8.1.13 shipped as. Tooling
-      # last: it depends on the host and the contract.
-      nuget-projects: >-
-        SW.Serverless.Contract/SW.Serverless.Contract.csproj
-        SW.Serverless/SW.Serverless.csproj
-        SW.Serverless.Sdk/SW.Serverless.Sdk.csproj
-        SW.Serverless.Tooling/SW.Serverless.Tooling.csproj
-      major-version: '10'
-      minor-version: '2'
-      dotnet-version: '10.0.x'
-      run-tests: true
-      test-projects: '**/*UnitTests/*.csproj'
-    secrets:
-      nuget-api-key: ${{ secrets.SWNUGETKEY }}
-      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
+      contents: read
+      security-events: read
+    steps:
+      - name: Check for open critical Dependabot alerts
+        uses: simplify9/.github/.github/actions/check-critical-vulns@main
+        with:
+          dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
+          repository: ${{ github.repository }}
+
+  nuget:
+    name: NuGet
+    needs: [version, critical-vuln-gate]
+    # The gate is skipped on non-release runs, so allow 'skipped' explicitly.
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && (needs.critical-vuln-gate.result == 'success'
+              || needs.critical-vuln-gate.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # the OIDC token NuGet/login trades for a short-lived API key
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Restore, build and test
+        uses: simplify9/.github/.github/actions/dotnet-build@main
+        with:
+          projects: '**/*.csproj'
+          configuration: Release
+          dotnet-version: '10.0.x'
+          run-tests: true
+          test-projects: '**/*UnitTests/*.csproj'
+      - name: NuGet login (OIDC to a one-hour API key)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+      - name: Pack and push
+        uses: simplify9/.github/.github/actions/dotnet-pack-push@main
+        with:
+          # Contract FIRST: the others depend on it, and publishing them without it produces
+          # packages whose dependency cannot resolve — which is what 8.1.13 shipped as. Tooling
+          # last: it depends on the host and the contract.
+          projects: >-
+            SW.Serverless.Contract/SW.Serverless.Contract.csproj
+            SW.Serverless/SW.Serverless.csproj
+            SW.Serverless.Sdk/SW.Serverless.Sdk.csproj
+            SW.Serverless.Tooling/SW.Serverless.Tooling.csproj
+          configuration: Release
+          version: ${{ needs.version.outputs.git-tag }}
+          api-key: ${{ steps.login.outputs.NUGET_API_KEY }}
+          nuget-source: 'https://api.nuget.org/v3/index.json'
+
+  tag:
+    name: Tag
+    needs: [version, nuget]
+    # Only after a successful push, so a tag never names an unpublished version.
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && needs.nuget.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Tag the version
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ needs.version.outputs.git-tag }}
+          sha: ${{ github.sha }}
 
   # The sw-serverless CLI and the Python and Node SDKs carry the version the packages were just
   # published with, so nothing is tagged by hand. From main that is a release; a run by hand on
   # another branch publishes a prerelease, which releases the CLI as a pre-release and skips the SDKs.
   CLI:
-    needs: Publish
+    needs: [version, tag]
     permissions:
       contents: write         # creates the GitHub release
     uses: ./.github/workflows/cli-release.yml
     with:
-      version: ${{ needs.Publish.outputs.version }}
+      version: ${{ needs.version.outputs.git-tag }}
 
   SDKs:
-    needs: Publish
+    needs: [version, tag]
     permissions:
       contents: read
     uses: ./.github/workflows/sdk-release.yml
     with:
-      version: ${{ needs.Publish.outputs.version }}
+      version: ${{ needs.version.outputs.git-tag }}
     secrets: inherit
